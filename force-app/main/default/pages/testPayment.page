@@ -33,6 +33,7 @@
                 <button onclick="testValidateInvoiceAccount()">Test Validate Invoice/Account</button>
                 <button onclick="testAccountDetails()">Test Get Account Details</button>
                 <button onclick="testInvoiceDetails()">Test Get Invoice Details</button>
+                <button onclick="testPaymentMethodDetails()">Test Get Payment Method Details</button>
                 <div id="test-results" style="margin-top: 10px;"></div>
             </div>
             

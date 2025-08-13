@@ -425,17 +425,32 @@
                     // Convert amount to cents
                     const amountCents = Math.round(amount * 100);
                     
-                    // Create Payment Intent on the server
+                    // Get metadata for the payment intent
+                    const invoiceId = document.getElementById('invoiceId').value;
+                    const accountId = document.getElementById('accountId').value;
+                    const cardholderName = document.getElementById('cardholder-name').value;
+                    
+                    
+                    console.log('🏷️ Payment Intent Metadata:');
+                    console.log('  - Account ID (org_id):', accountId);
+                    console.log('  - Invoice ID:', invoiceId);
+                    console.log(' -cardholder name: ',cardholderName);
+                    
+                    
+                    // Create Payment Intent on the server with metadata
                     const paymentIntentResponse = await new Promise((resolve, reject) => {
                         Visualforce.remoting.Manager.invokeAction(
-                            '{!$RemoteAction.StripeIntentController.createPaymentIntent}',
+                            '{!$RemoteAction.StripeIntentController.createPaymentIntentWithMetadata}',
                             amountCents,
                             'usd',
                             'HomeWater Payment',
                             document.getElementById('email').value || null,
+                            accountId, // org_id (using account ID as organization identifier)
+                            invoiceId,
+                            cardholderName, // invoice_id
                             function(result, event) {
                                 if (event.status) {
-                                    console.log('✅ Payment Intent created:', result);
+                                    console.log('✅ Payment Intent created with metadata:', result);
                                     resolve(result);
                                 } else {
                                     console.error('❌ Payment Intent creation failed:', event.message);
@@ -597,17 +612,77 @@
                 }
             }
             
-            // Load invoice details
+            // Load today's invoice details for the specific account
             async function loadInvoiceDetails() {
                 const invoiceId = document.getElementById('invoiceId').value;
                 const accountId = document.getElementById('accountId').value;
                 
-                console.log('📄 Loading invoice details...', { invoiceId, accountId });
+                console.log('📄 Loading today\'s invoice details for account...', { invoiceId, accountId });
                 
-                if (!invoiceId) {
-                    document.getElementById('card-errors').textContent = 'No invoice ID provided in URL parameters';
+                if (!accountId) {
+                    document.getElementById('card-errors').textContent = 'No account ID provided in URL parameters';
                     return;
                 }
+                
+                try {
+                    // Try to get today's invoice for this specific account first
+                    const todaysInvoiceDetails = await new Promise((resolve, reject) => {
+                        Visualforce.remoting.Manager.invokeAction(
+                            '{!$RemoteAction.StripeIntentController.getTodaysInvoiceForAccount}',
+                            accountId,
+                            function(result, event) {
+                                if (event.status) {
+                                    console.log('✅ Today\'s invoice details loaded:', result);
+                                    resolve(result);
+                                } else {
+                                    console.error('❌ Failed to load today\'s invoice details:', event.message);
+                                    reject(new Error(event.message || 'Failed to load today\'s invoice details'));
+                                }
+                            },
+                            { escape: false }
+                        );
+                    });
+                    
+                    // Parse invoice details
+                    const todaysInvoice = JSON.parse(todaysInvoiceDetails);
+                    if (todaysInvoice.error) {
+                        // If no today's invoice found, fallback to the original invoice if provided
+                        if (invoiceId) {
+                            console.log('⚠️ No today\'s invoice found, falling back to original invoice:', invoiceId);
+                            return await loadOriginalInvoiceDetails(invoiceId);
+                        } else {
+                            throw new Error(todaysInvoice.message);
+                        }
+                    }
+                    
+                    // Update the amount field with today's invoice balance
+                    const amountInput = document.getElementById('payment-amount');
+                    const invoiceInfo = document.getElementById('invoice-info');
+                    
+                    amountInput.value = todaysInvoice.balance.toFixed(2);
+                    invoiceInfo.innerHTML = `
+                        <strong>📅 Today's Invoice Found!</strong><br>
+                        Invoice: ${todaysInvoice.name}<br>
+                        Due Amount: $${todaysInvoice.balance.toFixed(2)}<br>
+                        Invoice Date: ${new Date(todaysInvoice.invoiceDate).toLocaleDateString()}
+                    `;
+                    invoiceInfo.style.color = '#28a745';
+                    invoiceInfo.style.fontSize = '13px';
+                    
+                    // Update the hidden invoiceId field with today's invoice ID
+                    document.getElementById('invoiceId').value = todaysInvoice.id;
+                    
+                    console.log('✅ Today\'s invoice details displayed:', todaysInvoice.name);
+                    
+                } catch (e) {
+                    console.error('❌ Error loading today\'s invoice details:', e);
+                    document.getElementById('card-errors').textContent = e.message;
+                }
+            }
+            
+            // Fallback function to load original invoice if today's invoice is not found
+            async function loadOriginalInvoiceDetails(invoiceId) {
+                console.log('📄 Loading original invoice details...', invoiceId);
                 
                 try {
                     const invoiceDetails = await new Promise((resolve, reject) => {
@@ -616,11 +691,11 @@
                             invoiceId,
                             function(result, event) {
                                 if (event.status) {
-                                    console.log('✅ Invoice details loaded:', result);
+                                    console.log('✅ Original invoice details loaded:', result);
                                     resolve(result);
                                 } else {
-                                    console.error('❌ Failed to load invoice details:', event.message);
-                                    reject(new Error(event.message || 'Failed to load invoice details'));
+                                    console.error('❌ Failed to load original invoice details:', event.message);
+                                    reject(new Error(event.message || 'Failed to load original invoice details'));
                                 }
                             },
                             { escape: false }
@@ -638,13 +713,21 @@
                     const invoiceInfo = document.getElementById('invoice-info');
                     
                     amountInput.value = invoice.balance.toFixed(2);
-                    invoiceInfo.textContent = `Invoice: ${invoice.name} | Due Amount: $${invoice.balance.toFixed(2)}`;
+                    invoiceInfo.innerHTML = `
+                        <strong>⚠️ Original Invoice (Not Today's)</strong><br>
+                        Invoice: ${invoice.name}<br>
+                        Due Amount: $${invoice.balance.toFixed(2)}<br>
+                        Invoice Date: ${new Date(invoice.invoiceDate).toLocaleDateString()}
+                    `;
+                    invoiceInfo.style.color = '#ffc107';
+                    invoiceInfo.style.fontSize = '13px';
                     
-                    console.log('✅ Invoice details displayed');
+                    console.log('✅ Original invoice details displayed');
                     
                 } catch (e) {
-                    console.error('❌ Error loading invoice details:', e);
+                    console.error('❌ Error loading original invoice details:', e);
                     document.getElementById('card-errors').textContent = e.message;
+                    throw e;
                 }
             }
 
