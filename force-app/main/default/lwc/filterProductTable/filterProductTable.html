@@ -1,0 +1,32 @@
+<template>
+    <div class="slds-p-around_small">
+        <template if:true={isLoading}>
+            <div class="slds-text-align_center slds-p-around_large">
+                <lightning-spinner alternative-text="Loading products..." size="medium"></lightning-spinner>
+                <p class="slds-m-top_small">Loading products...</p>
+            </div>
+        </template>
+
+        <template if:false={isLoading}>
+            <template if:true={hasData}>
+                <div class="datatable-container">
+                    <lightning-datatable
+                        key-field="Id"
+                        data={data}
+                        columns={columns}
+                        onrowselection={handleRowSelection}
+                        selected-rows={selectedRows}>
+                    </lightning-datatable>
+                </div>
+            </template>
+
+            <template if:false={hasData}>
+                <div class="slds-text-align_center slds-p-around_large">
+                    <lightning-icon icon-name="utility:search" size="large" class="slds-m-bottom_small"></lightning-icon>
+                    <p class="slds-text-heading_small slds-m-bottom_small">No Products Found</p>
+                    <p class="slds-text-color_weak">No products match the selected criteria</p>
+                </div>
+            </template>
+        </template>
+    </div>
+</template>

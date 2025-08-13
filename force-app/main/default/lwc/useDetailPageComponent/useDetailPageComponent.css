@@ -1,0 +1,30 @@
+/* Container for the thank you component */
+.thank-you-wrapper {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 2rem;
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* General form styling */
+.slds-form-element_stacked .slds-form-element__label {
+    font-weight: 600;
+}
+
+/* Center the thank you content properly */
+.slds-grid_align-center {
+    justify-content: center;
+    align-items: center;
+    min-height: 400px;
+}
+
+/* Responsive design for thank you section */
+@media (max-width: 768px) {
+    .slds-x-large-size_6-of-12,
+    .slds-large-size_8-of-12 {
+        width: 95% !important;
+        padding: 1rem;
+    }
+}

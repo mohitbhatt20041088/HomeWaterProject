@@ -1,0 +1,72 @@
+.thank-you-container {
+    text-align: center;
+    padding: 2rem;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.thank-you-container h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #2c3e50;
+    margin-bottom: 1rem;
+}
+
+.thank-you-container p {
+    font-size: 1rem;
+    color: #586069;
+    line-height: 1.5;
+    margin-bottom: 1.5rem;
+}
+
+/* Add more spacing above the button */
+.thank-you-container lightning-button {
+    margin-top: 2rem;
+}
+
+/* Custom error styling */
+.slds-alert_error h2 {
+    font-size: 0.875rem;
+    margin: 0;
+    font-weight: 500;
+}
+
+/* Loading text styling */
+.slds-text-body_small {
+    color: #586069;
+    font-style: italic;
+}
+
+/* Button customization */
+lightning-button {
+    --slds-c-button-brand-color-background: #2c3e50;
+    --slds-c-button-brand-color-background-hover: #466282;
+}
+
+/* Loading container */
+.loading-container {
+    text-align: center;
+    margin-top: 1rem;
+}
+
+.loading-spinner {
+    font-size: 1.5rem;
+    animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Error message styling */
+.error-message {
+    background: #ffeaa7;
+    border: 1px solid #fdcb6e;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+}

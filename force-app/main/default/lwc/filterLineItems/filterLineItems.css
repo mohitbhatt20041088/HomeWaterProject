@@ -1,0 +1,85 @@
+/* Make modal extra wide and perfectly centered for table display */
+.slds-modal {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transform: none !important;
+}
+
+.slds-modal__container {
+    position: relative !important;
+    transform: none !important;
+    max-width: 85vw !important;
+    width: 85vw !important;
+    min-width: 900px;
+    max-height: 80vh !important;
+    height: auto !important;
+    margin: 0 auto !important;
+    top: auto !important;
+    left: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+/* Ensure modal content takes full width */
+.slds-modal__content {
+    display: block;
+    max-height: 60vh;
+    overflow-y: auto;
+    width: 100%;
+    padding: 1rem;
+}
+
+/* Center the Filtered Products heading */
+.slds-modal__header,
+.slds-modal__title,
+.slds-modal__footer {
+    text-align: center;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Ensure datatable fits without overflowing */
+.slds-modal__content c-filter-product-table {
+    display: block;
+    width: 100%;
+}
+
+/* Improve table display in modal */
+.slds-modal__content lightning-datatable {
+    width: 100% !important;
+    min-height: 300px;
+    pointer-events: auto !important;
+}
+
+/* Ensure all datatable elements in modal are interactive */
+.slds-modal__content lightning-datatable .slds-checkbox,
+.slds-modal__content lightning-datatable .slds-checkbox_faux,
+.slds-modal__content lightning-datatable .slds-checkbox__label,
+.slds-modal__content lightning-datatable input[type="checkbox"] {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    z-index: 1000 !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+    .slds-modal__container {
+        max-width: 95vw !important;
+        width: 95vw !important;
+        min-width: auto;
+    }
+}
+
+@media (max-width: 768px) {
+    .slds-modal__container {
+        max-width: 98vw !important;
+        width: 98vw !important;
+        min-width: auto;
+    }
+}

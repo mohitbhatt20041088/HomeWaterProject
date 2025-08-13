@@ -1,0 +1,55 @@
+<template>
+    <lightning-card title="Filtered Products" icon-name="standard:product">
+        <!-- Product Cards Grid -->
+        <div class="slds-grid slds-wrap slds-grid_pull-padded-medium">
+            <template for:each={currentPageData} for:item="product">
+                <div key={product.id}
+                    class="slds-col slds-size_1-of-4 slds-size_1-of-2_medium slds-size_1-of-1_small slds-p-horizontal_medium slds-p-vertical_medium">
+                    <article class="slds-card product-card">
+                        <div class="slds-card__header">
+                            <template if:true={product.imageUrl}>
+                                <img src={product.imageUrl} alt={product.name} class="product-image" />
+                            </template>
+                            <template if:false={product.imageUrl}>
+                                <div class="slds-align_absolute-center product-placeholder">
+                                    <lightning-icon icon-name="standard:product" size="large"></lightning-icon>
+                                </div>
+                            </template>
+                        </div>
+                        <div class="slds-card__body slds-card__body_inner">
+                            <h3 class="slds-text-heading_small slds-truncate" title={product.name}>{product.name}</h3>
+                            <div class="slds-text-body_small slds-m-top_x-small">
+                                <p><strong>Type:</strong> {product.Billing_Type__c}</p>
+                                <p><strong>Family:</strong> {product.Family}</p>
+                                <p><strong>Preferred Block:</strong> {product.Preferred_Block__c}</p>
+                            </div>
+                        </div>
+                        <footer class="slds-card__footer">
+                            <lightning-button 
+                                label={product.buttonLabel} 
+                                variant={product.buttonVariant} 
+                                onclick={handleProductSelect}
+                                data-id={product.id}>
+                            </lightning-button>
+                        </footer>
+                    </article>
+                </div>
+            </template>
+        </div>
+
+        <!-- Pagination controls -->
+        <div class="slds-m-top_medium slds-align_absolute-center">
+            <lightning-button label="Previous" icon-name="utility:chevronleft" onclick={handlePrev}
+            >
+            </lightning-button>
+
+            <span class="slds-p-horizontal_medium">
+                Page {currentPage} of {totalPages}
+            </span>
+
+            <lightning-button label="Next" icon-name="utility:chevronright" icon-position="right" onclick={handleNext}
+            >
+            </lightning-button>
+        </div>
+    </lightning-card>
+</template>

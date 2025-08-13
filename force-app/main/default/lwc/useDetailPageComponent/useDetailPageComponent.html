@@ -1,0 +1,116 @@
+<template>
+    <div class="slds-container_fluid slds-p-around_medium">
+        
+        <!-- Thank You Section (shown after successful order) -->
+        <template if:true={showThankYou}>
+            <div class="slds-grid slds-grid_align-center slds-p-around_large">
+                <div class="slds-col slds-size_12-of-12 slds-large-size_8-of-12 slds-x-large-size_6-of-12">
+                    <div class="slds-text-align_center">
+                        <!-- Use the existing thankYouScreenComponent -->
+                        <c-thank-you-screen-component></c-thank-you-screen-component>
+                    </div>
+                </div>
+            </div>
+        </template>
+        
+        <!-- Main Form (hidden when thank you is shown) -->
+        <template if:false={showThankYou}>
+        <!-- Header Section -->
+        <div class="slds-page-header slds-m-bottom_large">
+            <div class="slds-media">
+                <div class="slds-media__figure">
+                    <lightning-icon icon-name="standard:contact" size="large"
+                        class="slds-icon_container slds-icon-standard-contact"></lightning-icon>
+                </div>
+                <div class="slds-media__body">
+                    <h1 class="slds-page-header__title slds-text-heading_large">Customer Information</h1>
+                    <p class="slds-text-body_regular slds-m-top_x-small">Please provide your details to complete the order
+                    </p>
+                </div>
+            </div>
+        </div>
+    
+        
+        <div class="slds-grid slds-gutters slds-wrap">
+            <!-- Personal Information Card -->
+            <div class="slds-col slds-size_1-of-1 slds-large-size_1-of-2">
+                <lightning-card title="Personal Information" icon-name="standard:person_account"
+                    class="slds-m-bottom_medium">
+                    <div class="slds-p-horizontal_medium slds-p-bottom_medium">
+                        <!-- Name Row -->
+                        <div class="slds-grid slds-gutters slds-m-bottom_medium">
+                            <div class="slds-col slds-size_1-of-2">
+                                <lightning-input type="text" label="First Name" placeholder="Enter first name"
+                                    name="firstName" value={firstName} onchange={handleInputChange} required
+                                    class="slds-form-element_stacked">
+                                </lightning-input>
+                            </div>
+                            <div class="slds-col slds-size_1-of-2">
+                                <lightning-input type="text" label="Last Name" placeholder="Enter last name" name="lastName"
+                                    value={lastName} onchange={handleInputChange} required
+                                    class="slds-form-element_stacked">
+                                </lightning-input>
+                            </div>
+                        </div>
+    
+                        <!-- Contact Information -->
+                        <div class="slds-form-element slds-m-bottom_medium">
+                            <lightning-input type="email" label="Email Address" placeholder="Enter your email address"
+                                name="emailAddress" value={emailAddress} onchange={handleInputChange} required
+                                class="slds-form-element_stacked">
+                            </lightning-input>
+                        </div>
+    
+                        <div class="slds-form-element slds-m-bottom_medium">
+                            <lightning-input type="tel" label="Phone Number" placeholder="Enter your phone number"
+                                name="phoneNumber" value={phoneNumber} onchange={handleInputChange} required
+                                class="slds-form-element_stacked">
+                            </lightning-input>
+                            <template if:true={phoneNumber}>
+                                <div class="slds-m-top_x-small">
+                                    <lightning-formatted-phone value={phoneNumber}
+                                        class="slds-text-color_weak"></lightning-formatted-phone>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </lightning-card>
+            </div>
+    
+            <!-- Shipping Address Card -->
+            <div class="slds-col slds-size_1-of-1 slds-large-size_1-of-2">
+                <lightning-card title="Shipping Address" icon-name="standard:location" class="slds-m-bottom_medium">
+                    <div class="slds-p-horizontal_medium slds-p-bottom_medium">
+                        <lightning-input-address address-label="" street-label="Street Address" city-label="City"
+                            province-label="State/Province" postal-code-label="Postal Code" country-label="Country"
+                            show-address-lookup="true" onchange={handleAddressChange} street={address.street}
+                            city={address.city} province={address.province} postal-code={address.postalCode}
+                            country={address.country} required>
+                        </lightning-input-address>
+                    </div>
+                </lightning-card>
+            </div>
+        </div>
+    
+        <!-- Action Buttons -->
+        <div class="slds-m-top_large slds-text-align_center">
+            <lightning-button 
+                label="Back to Products" 
+                variant="neutral" 
+                onclick={handleBackToProducts}
+                class="slds-m-right_small">
+            </lightning-button>
+            <lightning-button 
+                label="Create Order" 
+                variant="brand" 
+                onclick={handleCreateOrder} 
+                disabled={isSubmitting}>
+            </lightning-button>
+            <template if:true={isSubmitting}>
+                <lightning-spinner alternative-text="Processing..." size="small"
+                    class="slds-m-left_small"></lightning-spinner>
+            </template>
+        </div>
+        </template>
+    </div>
+</template>

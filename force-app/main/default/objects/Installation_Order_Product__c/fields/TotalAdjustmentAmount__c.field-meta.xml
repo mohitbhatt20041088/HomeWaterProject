@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>TotalAdjustmentAmount__c</fullName>
+    <label>Adjustments Tax</label>
+    <summarizedField>Installation_Order_Item_Adjustment__c.TotalTaxAmount__c</summarizedField>
+    <summaryForeignKey>Installation_Order_Item_Adjustment__c.InstallationOrderLineItemId__c</summaryForeignKey>
+    <summaryOperation>sum</summaryOperation>
+    <trackTrending>false</trackTrending>
+    <type>Summary</type>
+</CustomField>

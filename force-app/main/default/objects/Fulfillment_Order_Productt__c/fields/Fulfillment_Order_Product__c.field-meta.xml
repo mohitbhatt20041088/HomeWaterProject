@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Fulfillment_Order_Product__c</fullName>
+    <displayFormat>A-{00}</displayFormat>
+    <externalId>false</externalId>
+    <label>Fulfillment Order Product</label>
+    <trackTrending>false</trackTrending>
+    <type>AutoNumber</type>
+</CustomField>

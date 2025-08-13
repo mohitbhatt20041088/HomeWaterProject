@@ -1,0 +1,36 @@
+.datatable-container {
+    width: 100%;
+    overflow-x: auto;
+}
+
+/* Reset all pointer events to default */
+.datatable-container * {
+    pointer-events: auto;
+}
+
+/* Ensure datatable is fully interactive */
+lightning-datatable {
+    width: 100%;
+    pointer-events: auto;
+}
+
+/* Force enable checkbox interactions */
+lightning-datatable input[type="checkbox"] {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+}
+
+lightning-datatable .slds-checkbox {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+}
+
+lightning-datatable .slds-checkbox_faux {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+}
+
+lightning-datatable .slds-checkbox__label {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+}

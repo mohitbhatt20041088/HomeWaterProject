@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Installation_Order__c</fullName>
+    <label>Installation Order</label>
+    <referenceTo>Installation_Order__c</referenceTo>
+    <relationshipLabel>INSTALLATION ORDER PRODUCT</relationshipLabel>
+    <relationshipName>INSTALLATION_ORDER_PRODUCT</relationshipName>
+    <relationshipOrder>0</relationshipOrder>
+    <reparentableMasterDetail>false</reparentableMasterDetail>
+    <trackTrending>false</trackTrending>
+    <type>MasterDetail</type>
+    <writeRequiresMasterRead>false</writeRequiresMasterRead>
+</CustomField>

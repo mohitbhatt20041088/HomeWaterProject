@@ -1,0 +1,316 @@
+<apex:page showHeader="true" sidebar="false" docType="html-5.0">
+    <html>
+    <head>
+        <title>Stripe Payment Form</title>
+        <script src="https://js.stripe.com/v3/"></script>
+        <style>
+            .payment-container {
+                max-width: 500px;
+                margin: 50px auto;
+                padding: 20px;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                font-family: Arial, sans-serif;
+            }
+            
+            .form-group {
+                margin-bottom: 20px;
+            }
+            
+            label {
+                display: block;
+                margin-bottom: 5px;
+                font-weight: bold;
+                color: #333;
+            }
+            
+            input[type="text"], input[type="email"], input[type="number"] {
+                width: 100%;
+                padding: 12px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-size: 16px;
+                box-sizing: border-box;
+            }
+            
+            #card-element {
+                padding: 12px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: white;
+                margin-bottom: 10px;
+            }
+            
+            #card-errors {
+                color: #fa755a;
+                margin-top: 10px;
+                font-size: 14px;
+            }
+            
+            .pay-button {
+                background-color: #5469d4;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 4px;
+                font-size: 16px;
+                cursor: pointer;
+                width: 100%;
+                margin-top: 20px;
+            }
+            
+            .pay-button:hover {
+                background-color: #4c63d2;
+            }
+            
+            .pay-button:disabled {
+                background-color: #ccc;
+                cursor: not-allowed;
+            }
+            
+            .success-message {
+                background-color: #d4edda;
+                color: #155724;
+                padding: 12px;
+                border-radius: 4px;
+                border: 1px solid #c3e6cb;
+                margin-bottom: 20px;
+                display: none;
+            }
+            
+            .error-message {
+                background-color: #f8d7da;
+                color: #721c24;
+                padding: 12px;
+                border-radius: 4px;
+                border: 1px solid #f5c6cb;
+                margin-bottom: 20px;
+                display: none;
+            }
+            
+            .loading {
+                display: none;
+                text-align: center;
+                margin: 20px 0;
+            }
+            
+            .payment-summary {
+                background-color: #f8f9fa;
+                padding: 15px;
+                border-radius: 4px;
+                margin-bottom: 20px;
+                border: 1px solid #dee2e6;
+            }
+            
+            .amount-display {
+                font-size: 24px;
+                font-weight: bold;
+                color: #28a745;
+                text-align: center;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="payment-container">
+            <h2 style="text-align: center; color: #333; margin-bottom: 30px;">Secure Payment</h2>
+            
+            <!-- Success Message -->
+            <div id="success-message" class="success-message">
+                <strong>Payment Successful!</strong> Your transaction has been processed.
+            </div>
+            
+            <!-- Error Message -->
+            <div id="error-message" class="error-message">
+                <span id="error-text"></span>
+            </div>
+            
+            <!-- Payment Form -->
+            <form id="payment-form">
+                <!-- Customer Information -->
+                <div class="form-group">
+                    <label for="customer-name">Full Name</label>
+                    <input type="text" id="customer-name" placeholder="Enter your full name" required />
+                </div>
+                
+                <div class="form-group">
+                    <label for="customer-email">Email Address</label>
+                    <input type="email" id="customer-email" placeholder="Enter your email" required />
+                </div>
+                
+                <!-- Payment Amount -->
+                <div class="form-group">
+                    <label for="payment-amount">Amount (USD)</label>
+                    <input type="number" id="payment-amount" value="20.00" min="1" step="0.01" required />
+                </div>
+                
+                <!-- Payment Summary -->
+                <div class="payment-summary">
+                    <div style="text-align: center; margin-bottom: 10px;">
+                        <strong>Payment Summary</strong>
+                    </div>
+                    <div class="amount-display" id="amount-display">$20.00</div>
+                </div>
+                
+                <!-- Card Element -->
+                <div class="form-group">
+                    <label for="card-element">Credit or Debit Card</label>
+                    <div id="card-element">
+                        <!-- Stripe Elements will create form elements here -->
+                    </div>
+                    <div id="card-errors" role="alert"></div>
+                </div>
+                
+                <!-- Submit Button -->
+                <button type="submit" id="submit-button" class="pay-button">
+                    <span id="button-text">Pay Now</span>
+                    <div id="loading" class="loading">
+                        <span>Processing...</span>
+                    </div>
+                </button>
+            </form>
+        </div>
+
+        <script>
+            // Replace with your actual Stripe publishable key
+            const STRIPE_PUBLISHABLE_KEY = 'pk_test_YOUR_PUBLISHABLE_KEY_HERE';
+            
+            // Initialize Stripe
+            const stripe = Stripe(STRIPE_PUBLISHABLE_KEY);
+            const elements = stripe.elements();
+            
+            // Create card element
+            const cardElement = elements.create('card', {
+                style: {
+                    base: {
+                        fontSize: '16px',
+                        color: '#424770',
+                        '::placeholder': {
+                            color: '#aab7c4',
+                        },
+                    },
+                    invalid: {
+                        color: '#9e2146',
+                    },
+                },
+            });
+            
+            cardElement.mount('#card-element');
+            
+            // Handle card element changes
+            cardElement.on('change', function(event) {
+                const displayError = document.getElementById('card-errors');
+                if (event.error) {
+                    displayError.textContent = event.error.message;
+                } else {
+                    displayError.textContent = '';
+                }
+            });
+            
+            // Update amount display when amount changes
+            document.getElementById('payment-amount').addEventListener('input', function(e) {
+                const amount = parseFloat(e.target.value) || 0;
+                document.getElementById('amount-display').textContent = '$' + amount.toFixed(2);
+            });
+            
+            // Handle form submission
+            document.getElementById('payment-form').addEventListener('submit', async function(event) {
+                event.preventDefault();
+                
+                const submitButton = document.getElementById('submit-button');
+                const buttonText = document.getElementById('button-text');
+                const loading = document.getElementById('loading');
+                
+                // Disable submit button and show loading
+                submitButton.disabled = true;
+                buttonText.style.display = 'none';
+                loading.style.display = 'block';
+                
+                // Hide previous messages
+                hideMessages();
+                
+                // Get form data
+                const customerName = document.getElementById('customer-name').value;
+                const customerEmail = document.getElementById('customer-email').value;
+                const paymentAmount = document.getElementById('payment-amount').value;
+                
+                // Validate form
+                if (!customerName || !customerEmail || !paymentAmount) {
+                    showError('Please fill in all required fields.');
+                    resetSubmitButton();
+                    return;
+                }
+                
+                try {
+                    // Create payment method
+                    const {error, paymentMethod} = await stripe.createPaymentMethod({
+                        type: 'card',
+                        card: cardElement,
+                        billing_details: {
+                            name: customerName,
+                            email: customerEmail,
+                        },
+                    });
+                    
+                    if (error) {
+                        showError(error.message);
+                        resetSubmitButton();
+                        return;
+                    }
+                    
+                    // For demo purposes, we'll just show success
+                    // In a real implementation, you would send the paymentMethod.id to your server
+                    console.log('Payment Method Created:', paymentMethod);
+                    
+                    // Simulate processing delay
+                    setTimeout(() => {
+                        showSuccess();
+                        resetSubmitButton();
+                        
+                        // Optional: Clear form after successful payment
+                        document.getElementById('payment-form').reset();
+                        cardElement.clear();
+                        document.getElementById('amount-display').textContent = '$0.00';
+                    }, 2000);
+                    
+                } catch (err) {
+                    showError('An unexpected error occurred. Please try again.');
+                    resetSubmitButton();
+                }
+            });
+            
+            function showSuccess() {
+                document.getElementById('success-message').style.display = 'block';
+                // Hide success message after 5 seconds
+                setTimeout(() => {
+                    document.getElementById('success-message').style.display = 'none';
+                }, 5000);
+            }
+            
+            function showError(message) {
+                document.getElementById('error-text').textContent = message;
+                document.getElementById('error-message').style.display = 'block';
+                // Hide error message after 8 seconds
+                setTimeout(() => {
+                    document.getElementById('error-message').style.display = 'none';
+                }, 8000);
+            }
+            
+            function hideMessages() {
+                document.getElementById('success-message').style.display = 'none';
+                document.getElementById('error-message').style.display = 'none';
+            }
+            
+            function resetSubmitButton() {
+                const submitButton = document.getElementById('submit-button');
+                const buttonText = document.getElementById('button-text');
+                const loading = document.getElementById('loading');
+                
+                submitButton.disabled = false;
+                buttonText.style.display = 'block';
+                loading.style.display = 'none';
+            }
+        </script>
+    </body>
+    </html>
+</apex:page>

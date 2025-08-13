@@ -1,0 +1,34 @@
+<template>
+    <div class="thank-you-container">
+        <h1>🎉 Thank you for your order!</h1>
+        <p>
+            We're excited to have you on board. Your order is confirmed and being processed.<br />
+            To activate your account and unlock full access, please pay your first invoice now.
+        </p>
+        
+        <!-- Error message display -->
+        <template if:true={errorMessage}>
+            <div class="error-message">
+                <p style="color: #d73a49; font-size: 14px; margin: 10px 0;">{errorMessage}</p>
+            </div>
+        </template>
+        
+        <!-- Pay button with loading state -->
+        <lightning-button 
+            label="💳 Pay Your First Invoice" 
+            variant="brand" 
+            onclick={handlePayNow}
+            disabled={isLoading}
+            class="pay-button">
+        </lightning-button>
+        
+        <!-- Loading indicator -->
+        <template if:true={isLoading}>
+            <div class="loading-container">
+                <div class="loading-spinner">⏳</div>
+                <p style="font-size: 12px; color: #586069; margin-top: 10px;">Finding your first invoice...</p>
+            </div>
+        </template>
+        
+    </div>
+</template>

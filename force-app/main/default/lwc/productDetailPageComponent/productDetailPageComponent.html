@@ -1,0 +1,181 @@
+<template>
+    <lightning-card title="Selected Products" icon-name="standard:product">
+        <template if:true={products}>
+            <template if:true={products.length}>
+                <div class="slds-p-around_medium">
+                    <template for:each={products} for:item="product">
+                        <div key={product.Id} class="slds-box slds-theme_default slds-m-bottom_medium">
+                            <!-- Product Card -->
+                            <div class="slds-grid slds-gutters">
+                                <!-- Product Image and Details -->
+                                <div class="slds-col slds-size_1-of-2">
+                                    <div class="slds-media">
+                                        <div class="slds-media__figure">
+                                            <template if:true={product.imageUrl}>
+                                                <img src={product.imageUrl} alt={product.Name} class="product-detail-image" />
+                                            </template>
+                                            <template if:false={product.imageUrl}>
+                                                <div class="slds-avatar slds-avatar_large product-detail-placeholder">
+                                                    <lightning-icon icon-name="standard:product" size="large"></lightning-icon>
+                                                </div>
+                                            </template>
+                                        </div>
+                                        <div class="slds-media__body">
+                            <h3 class="slds-text-heading_medium">{product.Name}</h3>
+                            <div class="slds-text-body_small slds-m-top_small">
+                                <template if:true={product.Billing_Type__c}>
+                                    <p><strong>Type:</strong> {product.Billing_Type__c}</p>
+                                </template>
+                                <template if:true={product.Installation_Type__c}>
+                                    <p><strong>Installation:</strong> {product.Installation_Type__c}</p>
+                                </template>
+                                <template if:true={product.Family}>
+                                    <p><strong>Family:</strong> {product.Family}</p>
+                                </template>
+                                <template if:true={product.Stage__c}>
+                                    <p><strong>Stage:</strong> {product.Stage__c}</p>
+                                </template>
+                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Product Info Only -->
+                                <div class="slds-col slds-size_1-of-2">
+                                    <div class="product-info-section slds-box slds-theme_shade">
+                                        <h4 class="slds-text-heading_small slds-m-bottom_small">Product Information</h4>
+                                        
+                                        <!-- Individual Quantity Selection for this product -->
+                                        <div class="slds-form-element slds-m-bottom_small">
+                                            <lightning-input
+                                                type="number"
+                                                name="quantity"
+                                                label="Quantity"
+                                                value="1"
+                                                min="1"
+                                                step="1"
+                                                data-product-id={product.Id}
+                                                onchange={handleIndividualQuantityChange}>
+                                            </lightning-input>
+                                        </div>
+                                        
+                                        <!-- Show unit price and subtotal for reference -->
+                                        <div class="slds-grid slds-gutters_small">
+                                            <div class="slds-col slds-size_1-of-2">
+                                                <span>Unit Price:</span>
+                                            </div>
+                                            <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                                                <span>${product.unitPrice}</span>
+                                            </div>
+                                        </div>
+                                        <div class="slds-grid slds-gutters_small">
+                                            <div class="slds-col slds-size_1-of-2">
+                                                <span>Subtotal:</span>
+                                            </div>
+                                            <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                                                <span>${product.subtotal}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                
+                <!-- Unified Pricing Section (Like Amazon/Flipkart) -->
+                <div class="slds-box slds-theme_default slds-m-top_large">
+                    <div class="slds-grid slds-gutters">
+                        <!-- Left Side: Product Terms Selection -->
+                        <div class="slds-col slds-size_1-of-2">
+                            <h4 class="slds-text-heading_medium slds-m-bottom_medium">Order Summary</h4>
+                            
+                            <!-- Global Product Terms Selection -->
+                            <div class="slds-form-element slds-m-bottom_medium">
+                                <lightning-combobox
+                                    name="productTerms"
+                                    label="Product Terms (Applied to All Products)"
+                                    placeholder="Select Product Terms"
+                                    options={productTermOptions}
+                                    value={selectedProductTerm}
+                                    onchange={handleProductTermChange}
+                                    disabled>
+                                </lightning-combobox>
+                            </div>
+                        </div>
+                        
+                        <!-- Right Side: Price Breakdown -->
+                        <div class="slds-col slds-size_1-of-2">
+                            <div class="pricing-summary slds-box slds-theme_shade">
+                                <h5 class="slds-text-heading_small slds-m-bottom_small">Price Details</h5>
+                                
+                                <!-- Subtotal -->
+                                <div class="slds-grid slds-gutters_small slds-m-bottom_x-small">
+                                    <div class="slds-col slds-size_1-of-2">
+                                        <span>Subtotal ({products.length} items):</span>
+                                    </div>
+                                    <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                                        <span>${totalPriceWithoutTax}</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Tax -->
+                                <div class="slds-grid slds-gutters_small slds-m-bottom_x-small">
+                                    <div class="slds-col slds-size_1-of-2">
+                                        <span>Tax (10%):</span>
+                                    </div>
+                                    <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                                        <span>${taxAmount}</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Divider -->
+                                <hr class="slds-m-vertical_small">
+                                
+                                <!-- Grand Total -->
+                                <div class="slds-grid slds-gutters_small">
+                                    <div class="slds-col slds-size_1-of-2">
+                                        <strong class="slds-text-heading_small">Total Amount:</strong>
+                                    </div>
+                                    <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                                        <strong class="slds-text-heading_small" style="color: #1B96FF;">${totalPriceWithTax}</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Action Buttons -->
+                <div class="slds-m-top_large slds-text-align_center">
+                    <lightning-button 
+                        label="Proceed" 
+                        variant="brand" 
+                        onclick={handleAddToCart}
+                        class="slds-m-right_small">
+                    </lightning-button>
+                    <lightning-button 
+                        label="Back to Products" 
+                        variant="neutral" 
+                        onclick={handleBackToProducts}>
+                    </lightning-button>
+                </div>
+            </template>
+            
+            <!-- No Products Selected -->
+            <template if:false={products.length}>
+                <div class="slds-align_absolute-center slds-p-around_large">
+                    <div class="slds-text-heading_medium">No products selected</div>
+                    <div class="slds-text-body_regular slds-m-top_small">Please go back and select some products first.</div>
+                </div>
+            </template>
+        </template>
+
+        <!-- Loading State -->
+        <template if:false={products}>
+            <div class="slds-align_absolute-center slds-p-around_large">
+                <lightning-spinner alternative-text="Loading product details..." size="medium"></lightning-spinner>
+            </div>
+        </template>
+    </lightning-card>
+</template>

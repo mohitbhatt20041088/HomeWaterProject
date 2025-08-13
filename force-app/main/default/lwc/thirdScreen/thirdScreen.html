@@ -1,0 +1,63 @@
+<template>
+    <lightning-card title="Create Full Sales Order" icon-name="standard:sales_cadence">
+        <div class="slds-p-around_medium">
+            <!-- Spinner to show loading state -->
+            <template if:true={isLoading}>
+                <lightning-spinner alternative-text="Processing..." size="medium"></lightning-spinner>
+            </template>
+
+            <!-- Main Form Layout -->
+            <div class="slds-p-bottom_medium">
+                <h3 class="slds-section-title--divider">Customer Details</h3>
+                <div class="slds-grid slds-gutters slds-wrap">
+                    <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-2">
+                        <lightning-input
+                            label="First Name"
+                            name="firstName"
+                            required
+                            onchange={handleInputChange}>
+                        </lightning-input>
+                        <lightning-input
+                            label="Last Name"
+                            name="lastName"
+                            required
+                            onchange={handleInputChange}>
+                        </lightning-input>
+                        <lightning-input
+                            label="Email"
+                            type="email"
+                            name="email"
+                            required
+                            onchange={handleInputChange}>
+                        </lightning-input>
+                    </div>
+                    <div class="slds-col slds-size_1-of-1 slds-medium-size_1-of-2">
+                        <lightning-input
+                            label="Phone"
+                            type="tel"
+                            name="phone"
+                            required
+                            onchange={handleInputChange}>
+                        </lightning-input>
+                        <lightning-input
+                            label="Address"
+                            name="address"
+                            required
+                            onchange={handleInputChange}>
+                        </lightning-input>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer with Submit Button -->
+            <div class="slds-m-top_large slds-text-align_right">
+                <lightning-button
+                    label="Create Full Order"
+                    variant="brand"
+                    onclick={handleSubmit}
+                    disabled={isSubmitDisabled}>
+                </lightning-button>
+            </div>
+        </div>
+    </lightning-card>
+</template>

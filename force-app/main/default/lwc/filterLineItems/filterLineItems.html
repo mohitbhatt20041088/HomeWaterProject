@@ -1,0 +1,150 @@
+<template>
+    <div class="slds-p-around_medium">
+        <lightning-card>
+            <div slot="title" class="slds-text-align_center slds-p-around_small">
+                <h2 class="slds-text-heading_medium slds-m-bottom_small">{headerText}</h2>
+            </div>
+            <lightning-combobox 
+                name="billingType" 
+                label="Please select Billing Type" 
+                placeholder="Select billing type" 
+                options={billingOptions}
+                value={selectedBillingType}
+                onchange={handleBillingTypeChange}>
+            </lightning-combobox>
+
+            <lightning-combobox
+                name="Installation Type"
+                label="Please select the Installation Type (Self/Tech)"
+                placeholder="Select the Installation type"
+                options={installationOptions}
+                value={selectedInstallationType}
+                onchange={handleInstallationTypeChange}>
+            </lightning-combobox>
+
+            <lightning-combobox
+                name="Family Type"
+                label="Please Select the Product Family"
+                placeholder="Select the Product Family"
+                options={familyOptions}
+                value={selectedFamily}
+                onchange={handleProductFamilyChange}>
+            </lightning-combobox>
+
+            <lightning-combobox 
+                name="Stage Type" 
+                label="Please select Under Counter Stage" 
+                placeholder="Select the stage"
+                options={stageOptions}
+                value={selectedStage}
+                onchange={handleStageChange}>
+            </lightning-combobox>
+
+            <lightning-combobox
+                name="Preferred Block"
+                label="Please select Under Counter preferred block"
+                placeholder="Select the preferred block"
+                options={preferredBlockOptions}
+                value={selectedPreferredBlock}
+                onchange={handlePreferredBlockChange}>
+            </lightning-combobox>
+
+            <lightning-combobox
+                name="Product Terms"
+                label="Please select the Product Term"
+                placeholder="Please select the Product Term"
+                options={productTermOptions}
+                value={selectedProductTerm}
+                onchange={handleProductTermsChange}>
+            </lightning-combobox>
+
+            
+
+
+           
+           <div slot="footer" class="slds-text-align_center slds-p-around_medium">
+                <lightning-button 
+                    variant="brand" 
+                    label="Filter Products"
+                    class="slds-m-horizontal_small"
+                    onclick={handleFilterProducts}
+                    disabled={isLoading}>
+                </lightning-button>
+                <template if:true={isLoading}>
+                    <lightning-spinner alternative-text="Filtering..." size="small" class="slds-m-left_small"></lightning-spinner>
+                </template>
+           </div>
+        </lightning-card>
+    </div>
+
+    <!-- Modal for displaying filtered products -->
+    <template if:true={showModal}>
+        <section role="dialog" tabindex="-1" aria-labelledby="modal-heading-01" aria-modal="true" aria-describedby="modal-content-id-1" class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container">
+                <header class="slds-modal__header">
+                    <lightning-button-icon 
+                        icon-name="utility:close" 
+                        onclick={handleCloseModal} 
+                        alternative-text="close" 
+                        variant="bare-inverse" 
+                        class="slds-modal__close">
+                    </lightning-button-icon>
+                    <h2 id="modal-heading-01" class="slds-modal__title slds-hyphenate">
+                        Filtered Products ({modalProducts.length} found)
+                    </h2>
+                </header>
+                <div class="slds-modal__content slds-p-around_medium" id="modal-content-id-1">
+                    <c-filter-product-table 
+                        filtered-products={modalProducts}
+                        onproductselection={handleProductSelection}>
+                    </c-filter-product-table>
+                </div>
+                <footer class="slds-modal__footer">
+                    <lightning-button 
+                        variant="neutral" 
+                        label="Close" 
+                        onclick={handleCloseModal}>
+                    </lightning-button>
+                    <lightning-button 
+                        variant="brand" 
+                        label={addButtonLabel}
+                        onclick={handleAddSelectedProducts}
+                        disabled={isAddButtonDisabled}
+                        class="slds-m-left_x-small">
+                    </lightning-button>
+                    <template if:true={isAddingProducts}>
+                        <lightning-spinner alternative-text="Adding products..." size="small" class="slds-m-left_small"></lightning-spinner>
+                    </template>
+                </footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+
+    <!-- Third Screen Modal -->
+    <template if:true={showThirdScreenModal}>
+        <section role="dialog" tabindex="-1" aria-labelledby="third-screen-modal-heading" aria-modal="true" aria-describedby="third-screen-modal-content" class="slds-modal slds-fade-in-open slds-modal_large">
+            <div class="slds-modal__container">
+                <header class="slds-modal__header">
+                    <lightning-button-icon 
+                        icon-name="utility:close" 
+                        onclick={handleCloseThirdScreenModal} 
+                        alternative-text="close" 
+                        variant="bare-inverse" 
+                        class="slds-modal__close">
+                    </lightning-button-icon>
+                    <h2 id="third-screen-modal-heading" class="slds-modal__title slds-hyphenate">
+                        Create Full Sales Order
+                    </h2>
+                </header>
+                <div class="slds-modal__content slds-p-around_medium" id="third-screen-modal-content">
+                    <c-third-screen 
+                        selected-products={selectedProductsForThirdScreen}
+                        onordersubmitted={handleOrderSubmitted}>
+                    </c-third-screen>
+                </div>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+</template>

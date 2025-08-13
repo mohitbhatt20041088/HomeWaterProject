@@ -1,0 +1,214 @@
+<apex:page controller="StripeIntentController" showHeader="false" sidebar="false" docType="html-5.0" 
+           lightningStylesheets="true" standardStylesheets="false" cache="false">
+    <html>
+    <head>
+        <title>Test Payment Page</title>
+        <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            .container { max-width: 600px; margin: 0 auto; }
+            .debug-info { background: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px; }
+            .error { color: red; }
+            .success { color: green; }
+            button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        </style>
+    </head>
+    <body>
+        <!-- Hidden fields to store URL parameters -->
+        <input type="hidden" id="invoiceId" value="{!$CurrentPage.parameters.invoiceId}" />
+        <input type="hidden" id="accountId" value="{!$CurrentPage.parameters.accountId}" />
+        
+        <div class="container">
+            <h1>Payment Test Page</h1>
+            
+            <div id="url-debug" class="debug-info">
+                <h3>URL Parameters:</h3>
+                <p>Current URL: <span id="current-url"></span></p>
+                <p>Invoice ID: <span id="invoice-id-display"></span></p>
+                <p>Account ID: <span id="account-id-display"></span></p>
+            </div>
+            
+            <div id="controller-test" class="debug-info">
+                <h3>Controller Tests:</h3>
+                <button onclick="testPublishableKey()">Test Get Publishable Key</button>
+                <button onclick="testValidateInvoiceAccount()">Test Validate Invoice/Account</button>
+                <button onclick="testAccountDetails()">Test Get Account Details</button>
+                <button onclick="testInvoiceDetails()">Test Get Invoice Details</button>
+                <div id="test-results" style="margin-top: 10px;"></div>
+            </div>
+            
+            <div id="stripe-test" class="debug-info">
+                <h3>Stripe.js Test:</h3>
+                <button onclick="testStripeLoad()">Test Stripe.js Load</button>
+                <div id="stripe-results" style="margin-top: 10px;"></div>
+            </div>
+        </div>
+
+        <script>
+            // Initialize page
+            window.addEventListener('load', function() {
+                displayUrlInfo();
+            });
+            
+            function displayUrlInfo() {
+                const invoiceId = document.getElementById('invoiceId').value;
+                const accountId = document.getElementById('accountId').value;
+                
+                document.getElementById('current-url').textContent = window.location.href;
+                document.getElementById('invoice-id-display').textContent = invoiceId || 'Missing';
+                document.getElementById('account-id-display').textContent = accountId || 'Missing';
+            }
+            
+            function addResult(containerId, message, type = 'info') {
+                const container = document.getElementById(containerId);
+                const div = document.createElement('div');
+                div.className = type;
+                div.innerHTML = `${new Date().toLocaleTimeString()}: ${message}`;
+                container.appendChild(div);
+            }
+            
+            function testPublishableKey() {
+                addResult('test-results', 'Testing publishable key...', 'info');
+                
+                try {
+                    Visualforce.remoting.Manager.invokeAction(
+                        '{!$RemoteAction.StripeIntentController.getStripePublishableKey}',
+                        function(result, event) {
+                            if (event.status) {
+                                addResult('test-results', `✅ Publishable Key Retrieved: ${result ? result.substring(0, 12) + '...' : 'null'}`, 'success');
+                            } else {
+                                addResult('test-results', `❌ Failed to get publishable key: ${event.message}`, 'error');
+                            }
+                        },
+                        { escape: false }
+                    );
+                } catch (e) {
+                    addResult('test-results', `❌ Exception getting publishable key: ${e.message}`, 'error');
+                }
+            }
+            
+            function testValidateInvoiceAccount() {
+                const invoiceId = document.getElementById('invoiceId').value;
+                const accountId = document.getElementById('accountId').value;
+                
+                if (!invoiceId || !accountId) {
+                    addResult('test-results', '❌ Cannot test validation: Missing invoice or account ID', 'error');
+                    return;
+                }
+                
+                addResult('test-results', 'Testing invoice/account validation...', 'info');
+                
+                try {
+                    Visualforce.remoting.Manager.invokeAction(
+                        '{!$RemoteAction.StripeIntentController.validateInvoiceAccountRelationship}',
+                        invoiceId,
+                        accountId,
+                        function(result, event) {
+                            if (event.status) {
+                                const validation = JSON.parse(result);
+                                if (validation.success) {
+                                    addResult('test-results', `✅ Validation Successful: ${validation.message}`, 'success');
+                                } else {
+                                    addResult('test-results', `❌ Validation Failed: ${validation.message}`, 'error');
+                                }
+                            } else {
+                                addResult('test-results', `❌ Failed to validate: ${event.message}`, 'error');
+                            }
+                        },
+                        { escape: false }
+                    );
+                } catch (e) {
+                    addResult('test-results', `❌ Exception validating: ${e.message}`, 'error');
+                }
+            }
+            
+            function testAccountDetails() {
+                const accountId = document.getElementById('accountId').value;
+                
+                if (!accountId) {
+                    addResult('test-results', '❌ Cannot test account details: Missing account ID', 'error');
+                    return;
+                }
+                
+                addResult('test-results', 'Testing account details...', 'info');
+                
+                try {
+                    Visualforce.remoting.Manager.invokeAction(
+                        '{!$RemoteAction.StripeIntentController.getAccountDetails}',
+                        accountId,
+                        function(result, event) {
+                            if (event.status) {
+                                const account = JSON.parse(result);
+                                if (account.name) {
+                                    addResult('test-results', `✅ Account Details Retrieved: ${account.name}`, 'success');
+                                } else {
+                                    addResult('test-results', `❌ Account Error: ${account.message}`, 'error');
+                                }
+                            } else {
+                                addResult('test-results', `❌ Failed to get account details: ${event.message}`, 'error');
+                            }
+                        },
+                        { escape: false }
+                    );
+                } catch (e) {
+                    addResult('test-results', `❌ Exception getting account details: ${e.message}`, 'error');
+                }
+            }
+            
+            function testInvoiceDetails() {
+                const invoiceId = document.getElementById('invoiceId').value;
+                
+                if (!invoiceId) {
+                    addResult('test-results', '❌ Cannot test invoice details: Missing invoice ID', 'error');
+                    return;
+                }
+                
+                addResult('test-results', 'Testing invoice details...', 'info');
+                
+                try {
+                    Visualforce.remoting.Manager.invokeAction(
+                        '{!$RemoteAction.StripeIntentController.getInvoiceDetails}',
+                        invoiceId,
+                        function(result, event) {
+                            if (event.status) {
+                                const invoice = JSON.parse(result);
+                                if (invoice.name) {
+                                    addResult('test-results', `✅ Invoice Details Retrieved: ${invoice.name} - $${invoice.balance}`, 'success');
+                                } else {
+                                    addResult('test-results', `❌ Invoice Error: ${invoice.message}`, 'error');
+                                }
+                            } else {
+                                addResult('test-results', `❌ Failed to get invoice details: ${event.message}`, 'error');
+                            }
+                        },
+                        { escape: false }
+                    );
+                } catch (e) {
+                    addResult('test-results', `❌ Exception getting invoice details: ${e.message}`, 'error');
+                }
+            }
+            
+            function testStripeLoad() {
+                addResult('stripe-results', 'Testing Stripe.js load...', 'info');
+                
+                // Create script element to load Stripe.js
+                const script = document.createElement('script');
+                script.src = 'https://js.stripe.com/v3/';
+                script.onload = function() {
+                    addResult('stripe-results', '✅ Stripe.js loaded successfully', 'success');
+                    
+                    if (typeof Stripe !== 'undefined') {
+                        addResult('stripe-results', '✅ Stripe object is available', 'success');
+                    } else {
+                        addResult('stripe-results', '❌ Stripe object not available despite script load', 'error');
+                    }
+                };
+                script.onerror = function() {
+                    addResult('stripe-results', '❌ Failed to load Stripe.js - CSP or network issue', 'error');
+                };
+                
+                document.head.appendChild(script);
+            }
+        </script>
+    </body>
+    </html>
+</apex:page>

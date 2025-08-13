@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Documents__c</fullName>
+    <description>Links to documents of installation videos</description>
+    <inlineHelpText>Links to documents of installation videos</inlineHelpText>
+    <label>Documents and Videos</label>
+    <length>2000</length>
+    <type>Html</type>
+    <visibleLines>25</visibleLines>
+</CustomField>

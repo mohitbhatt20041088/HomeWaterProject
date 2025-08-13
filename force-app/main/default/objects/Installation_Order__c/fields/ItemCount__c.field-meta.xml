@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>ItemCount__c</fullName>
+    <label>Total Quantity</label>
+    <summarizedField>Installation_Order_Product__c.Quantity__c</summarizedField>
+    <summaryForeignKey>Installation_Order_Product__c.Installation_Order__c</summaryForeignKey>
+    <summaryOperation>sum</summaryOperation>
+    <trackTrending>false</trackTrending>
+    <type>Summary</type>
+</CustomField>

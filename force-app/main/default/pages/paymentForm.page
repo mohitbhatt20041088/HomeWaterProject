@@ -1,0 +1,797 @@
+<apex:page controller="StripeIntentController" showHeader="false" sidebar="false" docType="html-5.0" 
+           lightningStylesheets="true" standardStylesheets="false" cache="false" applyBodyTag="false"
+           applyHtmlTag="false" showQuickActionVfHeader="false">
+    <!-- Content Security Policy meta tag for Stripe.js -->
+    <html>
+    <head>
+        <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://*.stripe.com https://*.google.com https://*.googleapis.com; style-src 'self' 'unsafe-inline' https://*.google.com; frame-src 'self' https://*.stripe.com https://*.google.com; connect-src 'self' https://*.stripe.com https://api.stripe.com https://*.google.com https://*.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https:; object-src 'none';" />
+        <title>Stripe Payment Form</title>
+        <script src="https://js.stripe.com/v3/"></script>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                background-color: #f6f8fa;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+            }
+            .payment-container {
+                background-color: white;
+                width: 400px;
+                padding: 30px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            }
+
+            .tabs {
+                display: flex;
+                border-bottom: 1px solid #e1e4e8;
+            }
+            .tab-button {
+                padding: 10px 20px;
+                border: none;
+                background: none;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 500;
+                color: #586069;
+                border-bottom: 2px solid transparent;
+                margin-bottom: -1px;
+            }
+            .tab-button.active {
+                color: #0366d6;
+                border-bottom-color: #0366d6;
+            }
+
+            .tab-content {
+                display: none;
+                padding-top: 20px;
+            }
+            .tab-content.active {
+                display: block;
+            }
+
+            .form-group, .form-row {
+                margin-bottom: 15px;
+            }
+
+            .form-row {
+                display: flex;
+                gap: 15px;
+            }
+            .form-row .form-group {
+                width: 100%;
+            }
+
+            label {
+                display: block;
+                margin-bottom: 5px;
+                font-size: 13px;
+                font-weight: 500;
+                color: #24292e;
+            }
+
+            .StripeElement, .input-field {
+                border: 1px solid #d1d5da;
+                border-radius: 6px;
+                padding: 10px 12px;
+                background-color: white;
+                height: 40px;
+                box-sizing: border-box;
+                width: 100%;
+            }
+
+            .StripeElement--focus {
+                border-color: #0366d6;
+                box-shadow: 0 0 0 3px rgba(3, 102, 214, 0.3);
+            }
+
+            .info-text {
+                font-size: 12px;
+                color: #586069;
+                margin-top: 20px;
+                margin-bottom: 20px;
+            }
+
+            #card-errors {
+                color: #d73a49;
+                font-size: 13px;
+                margin-top: 8px;
+            }
+
+            .pay-button {
+                width: 100%;
+                background-color: #2c3e50; /* Dark background */
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 12px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: background-color 0.2s ease;
+            }
+            .pay-button:hover {
+                background-color: #466282;
+            }
+             .pay-button:disabled {
+                background: #9ca3af;
+                cursor: not-allowed;
+            }
+            
+            /* Thank you message styles */
+            .thank-you-screen {
+                display: none;
+                text-align: center;
+                padding: 40px 30px;
+            }
+            
+            .thank-you-screen.show {
+                display: block;
+            }
+            
+            .thank-you-icon {
+                font-size: 64px;
+                margin-bottom: 20px;
+            }
+            
+            .thank-you-title {
+                font-size: 28px;
+                font-weight: 700;
+                color: #2c3e50;
+                margin-bottom: 15px;
+            }
+            
+            .thank-you-message {
+                font-size: 16px;
+                color: #586069;
+                line-height: 1.5;
+                margin-bottom: 30px;
+            }
+            
+            .payment-details {
+                background: #f8f9fa;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 30px;
+                border-left: 4px solid #28a745;
+            }
+            
+            .payment-details h4 {
+                margin: 0 0 10px 0;
+                color: #2c3e50;
+                font-size: 16px;
+            }
+            
+            .payment-details p {
+                margin: 5px 0;
+                color: #586069;
+                font-size: 14px;
+            }
+            
+            .close-button {
+                background: #6c757d;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 12px 24px;
+                font-size: 14px;
+                cursor: pointer;
+                margin-top: 10px;
+            }
+            
+            .close-button:hover {
+                background: #545b62;
+            }
+
+        </style>
+    </head>
+    <body>
+        <!-- Hidden fields to store URL parameters -->
+        <input type="hidden" id="invoiceId" value="{!$CurrentPage.parameters.invoiceId}" />
+        <input type="hidden" id="accountId" value="{!$CurrentPage.parameters.accountId}" />
+        <div class="payment-container">
+            <!-- Payment Method Tabs -->
+            <div class="tabs">
+                <button class="tab-button active" onclick="switchTab('card')">Card</button>
+                <button class="tab-button" onclick="switchTab('bank')">US bank account</button>
+            </div>
+
+            <!-- Card Tab -->
+            <div id="card-tab" class="tab-content active">
+                <form id="payment-form">
+                    <div class="form-group">
+                        <label for="card-number-element">Card number</label>
+                        <div id="card-number-element" class="StripeElement"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="card-expiry-element">Expiration date</label>
+                            <div id="card-expiry-element" class="StripeElement"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="card-cvc-element">Security code</label>
+                            <div id="card-cvc-element" class="StripeElement"></div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="zip-code">ZIP code</label>
+                        <input id="zip-code" type="text" placeholder="12345" class="input-field" />
+                    </div>
+
+                    <p class="info-text">By providing your card information, you allow HomeWater to charge your card for future payments in accordance with their terms.</p>
+
+                    <hr/>
+                    
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label for="account-name">Account Name</label>
+                        <input id="account-name" type="text" placeholder="Loading account..." class="input-field" readonly="readonly" />
+                    </div>
+                    <div class="form-group">
+                        <label for="cardholder-name">Card Holder Name</label>
+                        <input id="cardholder-name" type="text" placeholder="Card Holder Name" class="input-field" required="required" />
+                    </div>
+                    <div class="form-group">
+                        <label for="email">Email (optional)</label>
+                        <input id="email" type="email" placeholder="Enter your email" class="input-field" />
+                    </div>
+                    
+                    <div id="card-errors" role="alert"></div>
+                    
+                    <!-- Payment Amount Section -->
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label for="payment-amount">Payment Amount (USD)</label>
+                        <input id="payment-amount" type="number" step="0.01" min="0.50" placeholder="Loading..." class="input-field" readonly="readonly" />
+                        <div id="invoice-info" style="margin-top: 5px; font-size: 12px; color: #586069;"></div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div style="margin-top: 20px;">
+                        <button id="pay-now-button" class="pay-button">Pay Now</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Bank Account Tab -->
+            <div id="bank-tab" class="tab-content">
+                <!-- Bank account content will go here in Phase 2 -->
+                <p>Functionality for US bank accounts will be added soon.</p>
+            </div>
+            
+            <!-- Thank You Message (Initially Hidden) -->
+            <div id="thank-you-screen" class="thank-you-screen">
+                <div class="thank-you-icon">🎉</div>
+                <h2 class="thank-you-title">Thank you for your payment!</h2>
+                <p class="thank-you-message">
+                    Your payment has been successfully processed and your invoice has been marked as paid.
+                    You will receive a confirmation email shortly.
+                </p>
+                <div id="payment-summary" class="payment-details">
+                    <h4>Payment Summary</h4>
+                    <p id="payment-amount-summary">Amount: $0.00</p>
+                    <p id="payment-date-summary">Date: </p>
+                    <p id="payment-status-summary">Status: Completed</p>
+                </div>
+                <button class="close-button" onclick="closeThankYouMessage()">Close</button>
+            </div>
+        </div>
+
+        <script>
+            // Get publishable key from Custom Metadata via Apex
+            let STRIPE_PUBLISHABLE_KEY = null;
+            
+            // Global variables
+            let stripe = null;
+            let elements = null;
+            let cardNumberElement = null;
+            let cardExpiryElement = null;
+            let cardCvcElement = null;
+            
+            // Tab switching function
+            function switchTab(tabName) {
+                // Hide all tab contents
+                document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+                document.querySelectorAll('.tab-button').forEach(button => button.classList.remove('active'));
+
+                // Show the selected tab content and activate the button
+                document.getElementById(tabName + '-tab').classList.add('active');
+                document.querySelector(`.tab-button[onclick="switchTab('${tabName}')"]`).classList.add('active');
+            }
+            
+            // Get Stripe Publishable Key from Apex
+            function getStripePublishableKey() {
+                return new Promise(function(resolve, reject) {
+                    Visualforce.remoting.Manager.invokeAction(
+                        '{!$RemoteAction.StripeIntentController.getStripePublishableKey}',
+                        function(result, event) {
+                            if (!event.status) {
+                                reject(event.message || 'Failed to get publishable key');
+                                return;
+                            }
+                            resolve(result);
+                        },
+                        { escape: false }
+                    );
+                });
+            }
+            
+            // Wait for Stripe to load, then initialize
+            async function initializeStripe() {
+                console.log('🔄 Initializing Stripe...');
+                
+                // Check if Stripe.js loaded
+                if (typeof Stripe === 'undefined') {
+                    console.error('❌ Stripe.js failed to load. CSP issue detected.');
+                    document.getElementById('card-errors').textContent = 'Stripe.js failed to load. Check your Content Security Policy settings.';
+                    return;
+                }
+                
+                try {
+                    console.log('✅ Stripe.js loaded successfully');
+                    
+                    // Get publishable key from Custom Metadata
+                    STRIPE_PUBLISHABLE_KEY = await getStripePublishableKey();
+                    console.log('✅ Publishable key retrieved from Custom Metadata');
+                    
+                    // Initialize Stripe
+                    stripe = Stripe(STRIPE_PUBLISHABLE_KEY);
+                    elements = stripe.elements();
+                    
+                    console.log('✅ Stripe initialized with publishable key from Custom Metadata');
+
+                    // Create individual card elements
+                    const elementStyles = { base: { fontSize: '14px', color: '#32325d', fontFamily: '"Helvetica Neue", Helvetica, sans-serif' } };
+                    cardNumberElement = elements.create('cardNumber', { style: elementStyles, placeholder: '1234 1234 1234 1234' });
+                    cardExpiryElement = elements.create('cardExpiry', { style: elementStyles });
+                    cardCvcElement = elements.create('cardCvc', { style: elementStyles, placeholder: 'CVC' });
+
+                    // Mount the elements to the DOM
+                    cardNumberElement.mount('#card-number-element');
+                    cardExpiryElement.mount('#card-expiry-element');
+                    cardCvcElement.mount('#card-cvc-element');
+
+                    // Handle validation errors
+                    [cardNumberElement, cardExpiryElement, cardCvcElement].forEach(element => {
+                        element.on('change', event => {
+                            const displayError = document.getElementById('card-errors');
+                            if (event.error) {
+                                displayError.textContent = event.error.message;
+                            } else {
+                                displayError.textContent = '';
+                            }
+                        });
+                    });
+
+                } catch (e) {
+                    console.error('❌ Error initializing Stripe:', e);
+                     document.getElementById('card-errors').textContent = e.message;
+                }
+            } 
+
+            // Prevent form submission
+            document.getElementById('payment-form').addEventListener('submit', function(event) {
+                event.preventDefault();
+            });
+            
+            // Helper function to validate card form
+            function validateCardForm() {
+                const cardholderName = document.getElementById('cardholder-name').value.trim();
+                if (!cardholderName) {
+                    document.getElementById('card-errors').textContent = 'Cardholder name is required';
+                    return false;
+                }
+                return true;
+            }
+            
+            // Helper function to get billing details
+            function getBillingDetails() {
+                return {
+                    name: document.getElementById('cardholder-name').value,
+                    email: document.getElementById('email').value,
+                    address: {
+                        postal_code: document.getElementById('zip-code').value
+                    }
+                };
+            }
+            
+            
+            // Pay Now button logic (Payment Intent)
+            document.getElementById('pay-now-button').addEventListener('click', async function(event) {
+                event.preventDefault();
+                
+                if (!validateCardForm()) return;
+                
+                const payNowButton = document.getElementById('pay-now-button');
+                const amountInput = document.getElementById('payment-amount');
+                const amount = parseFloat(amountInput.value);
+                
+                // Validate amount
+                if (!amount || amount < 0.50) {
+                    document.getElementById('card-errors').textContent = 'Please enter a valid amount (minimum $0.50)';
+                    return;
+                }
+                
+                payNowButton.disabled = true;
+                payNowButton.textContent = `Processing $${amount.toFixed(2)}...`;
+                
+                // Clear any previous errors
+                document.getElementById('card-errors').textContent = '';
+                
+                try {
+                    console.log('🔄 Creating Payment Intent...');
+                    
+                    // Convert amount to cents
+                    const amountCents = Math.round(amount * 100);
+                    
+                    // Create Payment Intent on the server
+                    const paymentIntentResponse = await new Promise((resolve, reject) => {
+                        Visualforce.remoting.Manager.invokeAction(
+                            '{!$RemoteAction.StripeIntentController.createPaymentIntent}',
+                            amountCents,
+                            'usd',
+                            'HomeWater Payment',
+                            document.getElementById('email').value || null,
+                            function(result, event) {
+                                if (event.status) {
+                                    console.log('✅ Payment Intent created:', result);
+                                    resolve(result);
+                                } else {
+                                    console.error('❌ Payment Intent creation failed:', event.message);
+                                    reject(new Error(event.message || 'Failed to create Payment Intent'));
+                                }
+                            },
+                            { escape: false }
+                        );
+                    });
+
+                    // Parse the response to get client_secret
+                    let clientSecret;
+                    try {
+                        const parsedResponse = JSON.parse(paymentIntentResponse);
+                        if (parsedResponse.error) {
+                            throw new Error(parsedResponse.message || 'Payment Intent creation failed');
+                        }
+                        clientSecret = parsedResponse.client_secret;
+                        console.log('✅ Client secret extracted:', clientSecret ? 'Found' : 'Missing');
+                    } catch (parseError) {
+                        console.error('❌ Failed to parse Payment Intent response:', parseError);
+                        throw new Error('Invalid response from server');
+                    }
+
+                    if (!clientSecret) {
+                        throw new Error('Missing client secret from Payment Intent response');
+                    }
+
+                    console.log('🔄 Confirming payment...');
+                    
+                    // Confirm the payment
+                    const { paymentIntent, error } = await stripe.confirmCardPayment(clientSecret, {
+                        payment_method: {
+                            card: cardNumberElement,
+                            billing_details: getBillingDetails()
+                        }
+                    });
+
+                    if (error) {
+                        console.error('❌ Payment confirmation failed:', error);
+                        document.getElementById('card-errors').textContent = error.message;
+                        payNowButton.disabled = false;
+                        payNowButton.textContent = 'Pay Now';
+                    } else {
+                        // Handle successful payment
+                        console.log('✅ PaymentIntent succeeded:', paymentIntent);
+                        
+                        // Update invoice status after successful payment
+                        try {
+                            const invoiceId = document.getElementById('invoiceId').value;
+                            if (invoiceId) {
+                                console.log('🔄 Updating invoice status...');
+                                
+                                const cardholderName = document.getElementById('cardholder-name').value;
+                                
+                                const updateResult = await new Promise((resolve, reject) => {
+                                    Visualforce.remoting.Manager.invokeAction(
+                                        '{!$RemoteAction.StripeIntentController.updateInvoiceAfterPayment}',
+                                        invoiceId,
+                                        paymentIntent.id,
+                                        amountCents,
+                                        cardholderName,
+                                        function(result, event) {
+                                            if (event.status) {
+                                                console.log('✅ Invoice updated successfully:', result);
+                                                resolve(result);
+                                            } else {
+                                                console.error('❌ Failed to update invoice:', event.message);
+                                                reject(new Error(event.message || 'Failed to update invoice'));
+                                            }
+                                        },
+                                        { escape: false }
+                                    );
+                                });
+                                
+                                console.log('✅ Invoice status updated');
+                            }
+                        } catch (invoiceUpdateError) {
+                            console.error('❌ Error updating invoice:', invoiceUpdateError);
+                            // Don't fail the whole process if invoice update fails
+                        }
+                        
+                        // Show thank you message and hide payment form
+                        showThankYouMessage(amount);
+                        
+                        // Update the invoice info to show paid status
+                        document.getElementById('invoice-info').textContent = 'Invoice Status: PAID';
+                        
+                        // Keep button disabled to prevent double payment
+                    }
+                } catch (e) {
+                    console.error('❌ Payment process failed:', e);
+                    document.getElementById('card-errors').textContent = e.message || 'An error occurred while processing your payment';
+                    payNowButton.disabled = false;
+                    payNowButton.textContent = 'Pay Now';
+                }
+            });
+
+            // Load account details
+            async function loadAccountDetails() {
+                const accountId = document.getElementById('accountId').value;
+                
+                console.log('🏢 Loading account details...', { accountId });
+                
+                if (!accountId) {
+                    document.getElementById('account-name').placeholder = 'No account ID provided';
+                    return;
+                }
+                
+                try {
+                    const accountDetails = await new Promise((resolve, reject) => {
+                        Visualforce.remoting.Manager.invokeAction(
+                            '{!$RemoteAction.StripeIntentController.getAccountDetails}',
+                            accountId,
+                            function(result, event) {
+                                if (event.status) {
+                                    console.log('✅ Account details loaded:', result);
+                                    resolve(result);
+                                } else {
+                                    console.error('❌ Failed to load account details:', event.message);
+                                    reject(new Error(event.message || 'Failed to load account details'));
+                                }
+                            },
+                            { escape: false }
+                        );
+                    });
+                    
+                    // Parse account details
+                    console.log('Raw account details response:', accountDetails);
+                    const account = JSON.parse(accountDetails);
+                    console.log('Parsed account object:', account);
+                    
+                    if (account.error) {
+                        throw new Error(account.message);
+                    }
+                    
+                    // Debug: Log all account properties
+                    console.log('Account properties:');
+                    console.log('  - ID:', account.id);
+                    console.log('  - Name:', account.name);
+                    console.log('  - Type:', account.type);
+                    console.log('  - Industry:', account.industry);
+                    
+                    // Update the account name field
+                    const accountNameInput = document.getElementById('account-name');
+                    if (account.name) {
+                        accountNameInput.value = account.name;
+                        console.log('✅ Account name set to:', account.name);
+                    } else {
+                        accountNameInput.value = 'Account name not available';
+                        console.log('⚠️ Account name is empty or undefined');
+                    }
+                    
+                    console.log('✅ Account details displayed');
+                    
+                } catch (e) {
+                    console.error('❌ Error loading account details:', e);
+                    document.getElementById('account-name').value = 'Error loading account';
+                }
+            }
+            
+            // Load invoice details
+            async function loadInvoiceDetails() {
+                const invoiceId = document.getElementById('invoiceId').value;
+                const accountId = document.getElementById('accountId').value;
+                
+                console.log('📄 Loading invoice details...', { invoiceId, accountId });
+                
+                if (!invoiceId) {
+                    document.getElementById('card-errors').textContent = 'No invoice ID provided in URL parameters';
+                    return;
+                }
+                
+                try {
+                    const invoiceDetails = await new Promise((resolve, reject) => {
+                        Visualforce.remoting.Manager.invokeAction(
+                            '{!$RemoteAction.StripeIntentController.getInvoiceDetails}',
+                            invoiceId,
+                            function(result, event) {
+                                if (event.status) {
+                                    console.log('✅ Invoice details loaded:', result);
+                                    resolve(result);
+                                } else {
+                                    console.error('❌ Failed to load invoice details:', event.message);
+                                    reject(new Error(event.message || 'Failed to load invoice details'));
+                                }
+                            },
+                            { escape: false }
+                        );
+                    });
+                    
+                    // Parse invoice details
+                    const invoice = JSON.parse(invoiceDetails);
+                    if (invoice.error) {
+                        throw new Error(invoice.message);
+                    }
+                    
+                    // Update the amount field with invoice balance
+                    const amountInput = document.getElementById('payment-amount');
+                    const invoiceInfo = document.getElementById('invoice-info');
+                    
+                    amountInput.value = invoice.balance.toFixed(2);
+                    invoiceInfo.textContent = `Invoice: ${invoice.name} | Due Amount: $${invoice.balance.toFixed(2)}`;
+                    
+                    console.log('✅ Invoice details displayed');
+                    
+                } catch (e) {
+                    console.error('❌ Error loading invoice details:', e);
+                    document.getElementById('card-errors').textContent = e.message;
+                }
+            }
+
+
+            async function validateInvoiceAccount(){
+                const invoiceId = document.getElementById('invoiceId').value;
+                const accountId = document.getElementById('accountId').value;
+
+                console.log('🔍 Validating invoice-account relationship...', { invoiceId, accountId });
+
+                if(!invoiceId){
+                    document.getElementById('card-errors').textContent = 'No invoice ID provided in URL parameters';
+                    document.getElementById('pay-now-button').disabled = true;
+                    return false;
+                }
+
+                if(!accountId){
+                    document.getElementById('card-errors').textContent = 'No account ID provided in URL parameters';
+                    document.getElementById('pay-now-button').disabled = true;
+                    return false;
+                }
+
+                try {
+                    const validationResult = await new Promise((resolve,reject)=>{
+                        Visualforce.remoting.Manager.invokeAction(
+                            '{!$RemoteAction.StripeIntentController.validateInvoiceAccountRelationship}',
+                            invoiceId,
+                            accountId,
+                            function(result,event){
+                                if(event.status){
+                                    console.log('✅ Validation result:', result);
+                                    resolve(result);
+                                }else{
+                                    console.error('❌ Validation failed:', event.message);
+                                    reject(new Error(event.message || 'Failed to validate invoice-account relationship'));
+                                }
+                            },
+                            { escape: false }
+                        );
+                    });
+
+                    const validation = JSON.parse(validationResult);
+                    if(validation.error){
+                        console.error('❌ Invoice-Account validation failed:', validation.message);
+                        document.getElementById('card-errors').textContent = validation.message;
+                        document.getElementById('pay-now-button').disabled = true;
+                        return false;
+                    }
+
+                    console.log('✅ Invoice-Account validation successful:', validation.message);
+                    return true;
+                    
+                } catch (error) {
+                    console.error('❌ Error validating invoice-account relationship:', error);
+                    document.getElementById('card-errors').textContent = error.message || 'Failed to validate invoice and account relationship';
+                    document.getElementById('pay-now-button').disabled = true;
+                    return false;
+                }
+            }
+            
+            // Function to show thank you message
+            function showThankYouMessage(amount) {
+                console.log('🎉 Showing thank you message for amount:', amount);
+                
+                // Hide the tabs and form
+                document.querySelector('.tabs').style.display = 'none';
+                document.getElementById('card-tab').style.display = 'none';
+                document.getElementById('bank-tab').style.display = 'none';
+                
+                // Update payment summary
+                document.getElementById('payment-amount-summary').textContent = `Amount: $${amount.toFixed(2)}`;
+                document.getElementById('payment-date-summary').textContent = `Date: ${new Date().toLocaleDateString()}`;
+                
+                // Show thank you screen
+                document.getElementById('thank-you-screen').classList.add('show');
+                
+                console.log('✅ Thank you message displayed');
+            }
+            
+            // Function to close thank you message and show form again
+            function closeThankYouMessage() {
+                console.log('🔄 Closing thank you message');
+                
+                // Hide thank you screen
+                document.getElementById('thank-you-screen').classList.remove('show');
+                
+                // Show the tabs and form again
+                document.querySelector('.tabs').style.display = 'flex';
+                document.getElementById('card-tab').style.display = 'block';
+                
+                // Reset the pay button
+                const payNowButton = document.getElementById('pay-now-button');
+                payNowButton.disabled = false;
+                payNowButton.textContent = 'Pay Now';
+                
+                // Clear form fields for potential new payment
+                document.getElementById('cardholder-name').value = '';
+                document.getElementById('email').value = '';
+                document.getElementById('zip-code').value = '';
+                document.getElementById('card-errors').textContent = '';
+                
+                console.log('✅ Payment form restored');
+            }
+            
+            // Initialize everything on page load
+            window.addEventListener('load', async function() {
+                // Debug: Show URL parameters
+                const invoiceId = document.getElementById('invoiceId').value;
+                const accountId = document.getElementById('accountId').value;
+                
+                console.log('🔍 URL Parameters Debug:');
+                console.log('  - Current URL:', window.location.href);
+                console.log('  - Invoice ID:', invoiceId);
+                console.log('  - Account ID:', accountId);
+                
+                // Show debug info in UI temporarily
+                if (!invoiceId || !accountId) {
+                    const debugInfo = document.createElement('div');
+                    debugInfo.style.cssText = 'background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 12px;';
+                    debugInfo.innerHTML = `
+                        <strong>Debug Info:</strong><br>
+                        Current URL: ${window.location.href}<br>
+                        Invoice ID: ${invoiceId || 'Missing'}<br>
+                        Account ID: ${accountId || 'Missing'}<br>
+                        <em>URL should include: ?invoiceId=xxx&accountId=yyy</em>
+                    `;
+                    document.querySelector('.payment-container').insertBefore(debugInfo, document.querySelector('.tabs'));
+                }
+                
+                // First validate that invoice belongs to account
+                const isValid = await validateInvoiceAccount();
+                
+                if (isValid) {
+                    // Only proceed with initialization if validation passes
+                    await initializeStripe();
+                    await loadAccountDetails();
+                    await loadInvoiceDetails();
+                } else {
+                    console.log('❌ Skipping payment form initialization due to validation failure');
+                    // Show a more user-friendly error message if not already shown
+                    if (!document.getElementById('card-errors').textContent) {
+                        document.getElementById('card-errors').textContent = 'Unable to process payment: Invalid invoice or account information';
+                    }
+                }
+            });
+
+        </script>
+    </body>
+    </html>
+</apex:page>

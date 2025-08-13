@@ -1,0 +1,101 @@
+<template>
+    <!-- Filter Screen -->
+    <template if:true={showFilterScreen}>
+        <lightning-card icon-name="standard:account" variant="base">
+          <div slot="title">
+            Filter Products
+          </div>
+          <div slot="footer" class="button-container">
+            <lightning-button label="Back" variant="neutral" onclick={handleBackToZip}></lightning-button>
+            <lightning-button label="Next" variant="brand" onclick={secondScreenHandler}></lightning-button>
+          </div>
+          <div>
+            
+            <lightning-combobox
+                    name="billingType" 
+                    label="Please select Billing Type" 
+                    placeholder="Select billing type" 
+                    options={billingPicklistOptions}
+                    value={billVal}
+                    onchange={getBillingType}
+                    
+            ></lightning-combobox>
+            <!-- <lightning-combobox
+                    name="Installation Type" 
+                    label="Please select the Installation Type (Self/Tech)" 
+                    placeholder="Select the Installation type" 
+                    options={installationPicklistOptions}
+                    value={installationVal}
+                    onchange={getInstallationType}
+                    
+            ></lightning-combobox> -->
+            <lightning-combobox
+                    name="Family Type" 
+                    label="Please Select the Product Family" 
+                    placeholder="Select the Product Family" 
+                    options={familyPicklistOptions}
+                    value={familyVal}
+                    onchange={getFamilyType}
+                    
+            ></lightning-combobox>
+            <lightning-combobox
+                    name="Stage Type" 
+                    label="Please select Under Counter Stage" 
+                    placeholder="Select the stage" 
+                    options={stagePicklistOptions}
+                    value={stageVal}
+                    onchange={getStageType}     
+            ></lightning-combobox>
+            <lightning-combobox
+                    name="Preferred Block" 
+                    label="Please select Under Counter preferred block" 
+                    placeholder="Select the preferred block" 
+                    options={preferredBlockPicklistOptions}
+                    value={perferredBlockVal}
+                    onchange={getPreferredBlockType}
+                    
+            ></lightning-combobox>
+            <lightning-combobox
+                    name="Product Terms" 
+                    label="Please select the Product Term" 
+                    placeholder="Please select the Product Term" 
+                    options={productTermPicklistOptions}
+                    value={productTermVal}
+                    onchange={getProductTermType} 
+                    required   
+            ></lightning-combobox>
+            
+          </div>
+        </lightning-card>
+    </template>
+    
+    <!-- Product Table Screen -->
+    <template if:true={showTableScreen}>
+        <c-filter-product-table-component 
+            zip-code={zipCode}
+            filtered-products={filteredProductsData}
+            selected-product-term={productTermVal}
+            onnavigate={handleNavigation}>
+        </c-filter-product-table-component>
+    </template>
+    
+    <!-- Product Detail Screen -->
+    <template if:true={showDetailScreen}>
+        <c-product-detail-page-component 
+            zip-code={zipCode}
+            selected-products={selectedProductsData}
+            selected-product-term={productTermVal}
+            onnavigate={handleNavigation}>
+        </c-product-detail-page-component>
+    </template>
+    
+    <!-- User Detail Screen -->
+    <template if:true={showUserDetailScreen}>
+        <c-use-detail-page-component 
+            zip-code={zipCode}
+            selected-products={selectedProductsData}
+            selected-product-term={productTermVal}
+            onnavigate={handleNavigation}>
+        </c-use-detail-page-component>
+    </template>
+</template>

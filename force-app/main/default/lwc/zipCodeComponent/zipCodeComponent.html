@@ -1,0 +1,99 @@
+<template>
+    <!-- Show zipCodeComponent when filter component is not active -->
+    <template if:false={showFilterComponent}>
+        <lightning-card icon-name="standard:location" variant="base">
+            <div slot="title">
+                Please enter your zip code to check serviceability
+            </div>
+            <div class="slds-var-m-around_medium">
+                <!-- Input Screen -->
+                <template if:false={isVerificationComplete}>
+                    <lightning-input 
+                        type="text" 
+                        label="Enter Zip Code" 
+                        name="zipCode" 
+                        value={zipCode}
+                        onchange={handleZipCodeChange}
+                        placeholder="e.g. 12345 or 12345-6789"
+                        max-length="10"
+                        required>
+                    </lightning-input>
+                    
+                    <!-- Validation Error Message -->
+                    <template if:true={hasValidationError}>
+                        <div class="slds-var-m-top_x-small">
+                            <div class="slds-notify slds-notify_alert slds-alert_error" role="alert">
+                                <lightning-icon icon-name="utility:error" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
+                                <span class="slds-assistive-text">Error</span>
+                                <strong>{validationMessage}</strong>
+                            </div>
+                        </div>
+                    </template>
+                    
+                    <div class="slds-var-m-top_small">
+                        <lightning-button 
+                            label="Verify Zip Code" 
+                            variant="brand" 
+                            onclick={handleVerifyZipCode}
+                            disabled={isVerifying}>
+                        </lightning-button>
+                    </div>
+                    
+                    <!-- Loading Spinner -->
+                    <template if:true={isVerifying}>
+                        <div class="slds-var-m-top_small">
+                            <lightning-spinner alternative-text="Verifying..." size="small"></lightning-spinner>
+                            <p class="slds-text-align_center">Verifying zip code...</p>
+                        </div>
+                    </template>
+                </template>
+
+                <!-- Result Screen -->
+                <template if:true={isVerificationComplete}>
+                    <div class="slds-var-m-top_small">
+                        <!-- Serviceable Area Message -->
+                        <template if:true={isServiceable}>
+                            <div class="slds-notify slds-notify_alert slds-alert_success">
+                                <lightning-icon icon-name="utility:success" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
+                                <!-- <span class="slds-assistive-text">Success</span> -->
+                                <strong>{serviceabilityMessage}</strong>
+                            </div>
+                        </template>
+                        
+                        <!-- Non-Serviceable Area Message -->
+                        <template if:false={isServiceable}>
+                            <div class="slds-notify slds-notify_alert slds-alert_error">
+                                <lightning-icon icon-name="utility:error" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
+                                <!-- <span class="slds-assistive-text">Error</span> -->
+                                <strong>{serviceabilityMessage}</strong>
+                            </div>
+                        </template>
+
+                        <div class="slds-var-m-top_medium button-container">
+                            <lightning-button 
+                                label="Back" 
+                                variant="neutral" 
+                                onclick={handleBackToInput}>
+                            </lightning-button>
+                            
+                            <!-- Next button - only show when serviceable -->
+                            <lightning-button 
+                                label="Next" 
+                                variant="brand" 
+                                onclick={handleNext}>
+                            </lightning-button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </lightning-card>
+    </template>
+
+    <!-- Show filterCriteriaComponent when active -->
+    <template if:true={showFilterComponent}>
+        <c-filter-criteria-component 
+            zip-code={zipCode}
+            onback={handleBackFromFilter}>
+        </c-filter-criteria-component>
+    </template>
+</template>

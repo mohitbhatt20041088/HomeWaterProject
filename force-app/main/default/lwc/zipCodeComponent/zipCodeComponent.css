@@ -1,0 +1,39 @@
+.slds-notify {
+    border-radius: 0.25rem;
+    padding: 0.75rem;
+    margin-top: 0.5rem;
+    background-color: #f3f3f3;
+    border: 1px solid #d8dde6;
+}
+
+.slds-alert_success {
+    background-color: #f3f3f3;
+    color: #080707;
+    border-color: #d8dde6;
+}
+
+.slds-alert_error {
+    background-color: #f3f3f3;
+    color: #080707;
+    border-color: #d8dde6;
+}
+
+.slds-notify lightning-icon {
+    fill: currentColor;
+}
+
+.button-container {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.zip-input {
+    max-width: 300px;
+}
+
+.loading-container {
+    text-align: center;
+    padding: 1rem;
+}

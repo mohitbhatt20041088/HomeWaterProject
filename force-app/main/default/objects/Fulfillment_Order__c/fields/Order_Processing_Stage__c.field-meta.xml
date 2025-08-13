@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Order_Processing_Stage__c</fullName>
+    <label>Order Processing Stage</label>
+    <required>false</required>
+    <trackTrending>false</trackTrending>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <sorted>false</sorted>
+            <value>
+                <fullName>Order Created</fullName>
+                <default>false</default>
+                <label>Order Created</label>
+            </value>
+            <value>
+                <fullName>Warehouse Packaging</fullName>
+                <default>false</default>
+                <label>Warehouse Packaging</label>
+            </value>
+            <value>
+                <fullName>Package Labeled</fullName>
+                <default>false</default>
+                <label>Package Labeled</label>
+            </value>
+            <value>
+                <fullName>Fulfillment Processing</fullName>
+                <default>false</default>
+                <label>Fulfillment Processing</label>
+            </value>
+            <value>
+                <fullName>Order Shipped/In Transit</fullName>
+                <default>false</default>
+                <label>Order Shipped/In Transit</label>
+            </value>
+            <value>
+                <fullName>Delivered</fullName>
+                <default>false</default>
+                <label>Delivered</label>
+            </value>
+            <value>
+                <fullName>Returned</fullName>
+                <default>false</default>
+                <label>Returned</label>
+            </value>
+            <value>
+                <fullName>Error</fullName>
+                <default>false</default>
+                <label>Error</label>
+            </value>
+            <value>
+                <fullName>Sales Order Cancelled</fullName>
+                <default>false</default>
+                <label>Sales Order Cancelled</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
