@@ -9,6 +9,7 @@ public with sharing class AccountCreationController {
         return ZipCodeController.checkServiceability(zipCode);
     }
     
+    
     @AuraEnabled
     public static string createAccountAndOrder(String firstName,String lastName,String emailAddress,String phoneNumber,String street,String city,String province,String postalCode,String country, String selectedProducts, String selectedProductTerm, String zipCodeFromComponent){
         return createAccountFromUserDetailsInternal(firstName, lastName, emailAddress, phoneNumber, street, city, province, postalCode, country, selectedProducts, selectedProductTerm, zipCodeFromComponent);
@@ -401,8 +402,6 @@ public with sharing class AccountCreationController {
     // Create invoices based on product terms
     private static String createInvoicesBasedOnTerms(Id orderId, Id accountId, String selectedProductTerm, List<OrderItem> orderItems) {
         try {
-             Decimal totalChargeAmountWithTax = 0.0;
-             Decimal totalChargeTax = 0.0;
             System.debug('=== INVOICE CREATION DEBUG ===');
             System.debug('OrderId: ' + orderId);
             System.debug('AccountId: ' + accountId);
@@ -458,6 +457,10 @@ public with sharing class AccountCreationController {
             // Create invoices one by one following the provided pattern
             for(Integer i = 1; i <= numberOfInvoices; i++) {
                 try {
+                    // Initialize totals for THIS specific invoice
+                    Decimal invoiceChargeAmountWithTax = 0.0;
+                    Decimal invoiceChargeTax = 0.0;
+                    
                     // 1. Create the Invoice record
                     Invoice__c newInvoice = new Invoice__c();
                     newInvoice.BillingAccountId__c = accountId;
@@ -508,13 +511,10 @@ public with sharing class AccountCreationController {
                         invoiceLineItem.Charge_Amount_with_Tax__c = finalUnitPrice + taxPrice;
                         invoiceLineItem.ChargeTaxAmount__c = taxPrice;
 
-                       totalChargeAmountWithTax += invoiceLineItem.Charge_Amount_with_Tax__c;
-                       totalChargeTax += invoiceLineItem.ChargeTaxAmount__c;
+                        // Add to THIS invoice's totals only
+                        invoiceChargeAmountWithTax += invoiceLineItem.Charge_Amount_with_Tax__c;
+                        invoiceChargeTax += invoiceLineItem.ChargeTaxAmount__c;
                         
-                        
-                        
-            
-
                         // Set invoice line dates
                         invoiceLineItem.InvoiceLineStartDate__c = newInvoice.InvoiceDate__c;
                         invoiceLineItem.InvoiceLineEndDate__c = newInvoice.InvoiceDate__c.addMonths(1).addDays(-1);
@@ -523,17 +523,23 @@ public with sharing class AccountCreationController {
                         
                         System.debug('Prepared InvoiceLine for Invoice ' + i + 
                                    ': Quantity=' + invoiceLineItem.Quantity__c + 
-                                   ', UnitPrice=' + invoiceLineItem.UnitPrice__c);
+                                   ', UnitPrice=' + invoiceLineItem.UnitPrice__c + 
+                                   ', ChargeAmountWithTax=' + invoiceLineItem.Charge_Amount_with_Tax__c);
                     }
                     
                     // Insert invoice line items
                     if(!invoiceLineItems.isEmpty()) {
                         try {
-                            newInvoice.TotalChargeAmountWithTax__c = totalChargeAmountWithTax;
-                            newInvoice.TotalChargeTaxAmount__c = totalChargeTax;
-                            newInvoice.Balance__c = totalChargeAmountWithTax;
+                            // Update invoice totals with THIS invoice's calculated amounts
+                            newInvoice.TotalChargeAmountWithTax__c = invoiceChargeAmountWithTax;
+                            newInvoice.TotalChargeTaxAmount__c = invoiceChargeTax;
+                            newInvoice.Balance__c = invoiceChargeAmountWithTax;
                             // newInvoice.BillToContactId__c = getContractIdFromAccount(accountId);
                             update newInvoice;
+                            
+                            System.debug('Updated Invoice ' + i + ' totals: ChargeAmountWithTax=' + invoiceChargeAmountWithTax + 
+                                       ', ChargeTax=' + invoiceChargeTax + ', Balance=' + invoiceChargeAmountWithTax);
+                            
                             insert invoiceLineItems;
                             totalInvoiceLinesCreated += invoiceLineItems.size();
                             System.debug('Successfully inserted ' + invoiceLineItems.size() + ' invoice line items for Invoice ' + i);
