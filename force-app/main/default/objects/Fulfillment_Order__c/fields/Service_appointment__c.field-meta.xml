@@ -4,7 +4,6 @@
     <deleteConstraint>SetNull</deleteConstraint>
     <label>Service appointment</label>
     <referenceTo>Order</referenceTo>
-    <relationshipLabel>Fulfillment Orders (Service appointment)</relationshipLabel>
     <relationshipName>Fulfillment_Orders1</relationshipName>
     <required>false</required>
     <trackTrending>false</trackTrending>

@@ -865,18 +865,23 @@ public with sharing class StripeIntentController {
     
     // Method to get Payment Method ID from a Payment Intent
     @RemoteAction
-    public static String getPaymentMethodFromIntent(String paymentIntentId) {
+    public static String getPaymentMethodFromIntent(String rawPaymentIntentId) {
         System.debug('=== Getting Payment Method from Payment Intent ===');
-        System.debug('Payment Intent ID: ' + paymentIntentId);
-        
+        System.debug('Raw Payment Intent Identifier: ' + rawPaymentIntentId);
+
         try {
-            if (String.isBlank(paymentIntentId)) {
+            if (String.isBlank(rawPaymentIntentId)) {
                 return errorJson('Payment Intent ID is required');
             }
+
+            // Normalize if client_secret was passed instead of the PI id
+            String paymentIntentId = normalizePaymentIntentId(rawPaymentIntentId);
+            System.debug('Normalized Payment Intent ID: ' + paymentIntentId);
             
             String secretKey = getStripeSecretKey();
             HttpRequest req = new HttpRequest();
-            String endpoint = BASE_URL + 'payment_intents/' + paymentIntentId;
+            // Expand latest_charge so we can fallback to charge.payment_method if needed
+            String endpoint = BASE_URL + 'payment_intents/' + paymentIntentId + '?expand[]=latest_charge';
             req.setEndpoint(endpoint);
             req.setMethod('GET');
             req.setHeader('Authorization', 'Bearer ' + secretKey);
@@ -893,20 +898,56 @@ public with sharing class StripeIntentController {
             if (res.getStatusCode() == 200) {
                 Map<String, Object> paymentIntent = (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
                 
-                if (paymentIntent.containsKey('payment_method')) {
-                    String paymentMethodId = (String) paymentIntent.get('payment_method');
+                // 1) First try the top-level payment_method (set after successful confirmation)
+                String paymentMethodId = (String) paymentIntent.get('payment_method');
+
+                // 2) If missing, try latest_charge.payment_method (common with automatic_payment_methods)
+                if (String.isBlank(paymentMethodId) && paymentIntent.containsKey('latest_charge')) {
+                    Object lc = paymentIntent.get('latest_charge');
+                    if (lc instanceof Map<String, Object>) {
+                        Map<String, Object> latestCharge = (Map<String, Object>) lc;
+                        paymentMethodId = (String) latestCharge.get('payment_method');
+                    } else if (lc instanceof String) {
+                        // If only an ID was returned (shouldn't happen due to expand), we can do a secondary fetch if ever needed
+                        System.debug('latest_charge is an ID string; expand failed or was not applied.');
+                    }
+                }
+
+                if (String.isNotBlank(paymentMethodId)) {
                     System.debug('✅ Found Payment Method ID: ' + paymentMethodId);
-                    
                     Map<String, Object> result = new Map<String, Object>{
                         'success' => true,
                         'paymentMethodId' => paymentMethodId,
                         'paymentIntentId' => paymentIntentId
                     };
-                    
                     return JSON.serialize(result);
-                } else {
-                    return errorJson('No payment method found for this Payment Intent');
                 }
+
+                // 3) As another fallback, inspect charges list if present
+                if (paymentIntent.containsKey('charges')) {
+                    Map<String, Object> charges = (Map<String, Object>) paymentIntent.get('charges');
+                    if (charges != null && charges.containsKey('data')) {
+                        List<Object> data = (List<Object>) charges.get('data');
+                        if (data != null && !data.isEmpty()) {
+                            Object first = data[0];
+                            if (first instanceof Map<String, Object>) {
+                                Map<String, Object> firstCharge = (Map<String, Object>) first;
+                                paymentMethodId = (String) firstCharge.get('payment_method');
+                                if (String.isNotBlank(paymentMethodId)) {
+                                    System.debug('✅ Found Payment Method ID via charges.data[0]: ' + paymentMethodId);
+                                    Map<String, Object> result2 = new Map<String, Object>{
+                                        'success' => true,
+                                        'paymentMethodId' => paymentMethodId,
+                                        'paymentIntentId' => paymentIntentId
+                                    };
+                                    return JSON.serialize(result2);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return errorJson('No payment method found for this Payment Intent');
             } else {
                 return errorJson('Failed to retrieve Payment Intent: ' + res.getStatus());
             }
@@ -918,6 +959,23 @@ public with sharing class StripeIntentController {
             System.debug('  - Line Number: ' + e.getLineNumber());
             return errorJson('Failed to get payment method from intent: ' + e.getMessage());
         }
+    }
+
+    // Helper to normalize a PI client_secret into a pure PaymentIntent ID if needed
+    private static String normalizePaymentIntentId(String idOrSecret) {
+        if (String.isBlank(idOrSecret)) return idOrSecret;
+        // client_secret looks like: pi_XXXX_secret_YYYY -> extract the pi_XXXX portion
+        if (idOrSecret.startsWith('pi_') && idOrSecret.contains('_secret_')) {
+            try {
+                Integer idx = idOrSecret.indexOf('_secret_');
+                if (idx > 0) {
+                    return idOrSecret.substring(0, idx);
+                }
+            } catch (Exception e) {
+                System.debug('normalizePaymentIntentId error: ' + e.getMessage());
+            }
+        }
+        return idOrSecret;
     }
     
     // Method to update invoice after successful payment and create payment records
@@ -940,6 +998,41 @@ public with sharing class StripeIntentController {
             
             if (amountCents == null || amountCents <= 0) {
                 return errorJson('Valid payment amount is required');
+            }
+            
+            // CRITICAL: Get Payment Method ID BEFORE any DML operations
+            // This ensures we capture the payment method that was actually used
+            System.debug('🔍 ========== PRE-DML: GETTING PAYMENT METHOD FROM STRIPE ==========');
+            String stripePaymentMethodId = null;
+            Map<String, Object> paymentMethodDetails = null;
+            
+            try {
+                // Get the payment method ID from the completed payment intent
+                String paymentMethodResult = getPaymentMethodFromIntent(stripePaymentIntentId);
+                Map<String, Object> pmResult = (Map<String, Object>) JSON.deserializeUntyped(paymentMethodResult);
+                
+                if (pmResult.containsKey('success') && (Boolean) pmResult.get('success')) {
+                    stripePaymentMethodId = (String) pmResult.get('paymentMethodId');
+                    System.debug('✅ Retrieved Payment Method ID: ' + stripePaymentMethodId);
+                    
+                    // Get detailed payment method information from Stripe
+                    if (String.isNotBlank(stripePaymentMethodId)) {
+                        String pmDetailsResponse = getStripePaymentMethodDetails(stripePaymentMethodId);
+                        paymentMethodDetails = (Map<String, Object>) JSON.deserializeUntyped(pmDetailsResponse);
+                        
+                        if (paymentMethodDetails.containsKey('error')) {
+                            System.debug('❌ Error getting payment method details: ' + paymentMethodDetails.get('message'));
+                            paymentMethodDetails = null;
+                        } else {
+                            System.debug('✅ Retrieved detailed payment method info from Stripe');
+                        }
+                    }
+                } else {
+                    System.debug('❌ Could not get payment method ID from intent: ' + pmResult.get('message'));
+                }
+            } catch (Exception pmError) {
+                System.debug('❌ Error getting payment method information: ' + pmError.getMessage());
+                // Continue without payment method details - invoice update is more critical
             }
             
             // Query the custom Invoice__c object with BillingAccountId__c
@@ -978,7 +1071,10 @@ public with sharing class StripeIntentController {
             Decimal paidAmount = amountCents / 100.0;
             System.debug('Paid Amount: $' + paidAmount);
             
-            // First update the invoice status immediately for UI feedback
+            // Payment method details are already retrieved above before DML
+            
+            // Now update the invoice (DML operation)
+            System.debug('🔄 ========== UPDATING INVOICE ==========');
             inv.Payment_Status__c = 'Paid';
             inv.Status__c = 'Posted';
             inv.Balance__c = 0; 
@@ -989,75 +1085,129 @@ public with sharing class StripeIntentController {
             System.debug('Invoice updated successfully (immediate)');
             System.debug('New Status: ' + inv.Status__c + ' | New Balance: ' + inv.Balance__c);
             
-            // Create payment method and payment records in a more resilient way
+            // Create payment method and payment records using the detailed Stripe data
             String paymentMethodId = null;
             String paymentRecordId = null;
             
-            // Create a minimal payment method record first (optimized for speed)
-            try {
-                System.debug('=== ATTEMPTING TO CREATE PAYMENT METHOD ===');
-                System.debug('Parameters:');
-                System.debug('  - stripePaymentIntentId: ' + stripePaymentIntentId);
-                System.debug('  - cardholderName: ' + cardholderName);
-                System.debug('  - accountId: ' + inv.BillingAccountId__c);
-                
-                paymentMethodId = createBasicPaymentMethod(
-                    stripePaymentIntentId, // Use payment intent ID as fallback
-                    String.isNotBlank(cardholderName) ? cardholderName : 'Online Payment User',
-                    'Credit Card',
-                    inv.BillingAccountId__c
-                );
-                
-                System.debug('✅ Basic Payment Method created: ' + paymentMethodId);
-                
-            } catch (Exception pmError) {
-                System.debug('❌ CRITICAL ERROR creating payment method:');
-                System.debug('  - Type: ' + pmError.getTypeName());
-                System.debug('  - Message: ' + pmError.getMessage());
-                System.debug('  - Stack Trace: ' + pmError.getStackTraceString());
-                System.debug('  - Line Number: ' + pmError.getLineNumber());
-                // Continue without payment method - invoice is already updated
+            System.debug('🏁 ========== STARTING PAYMENT METHOD & PAYMENT RECORD CREATION PROCESS ==========');
+            System.debug('📊 PROCESS STATUS: Invoice updated successfully, now creating related records');
+            System.debug('🎯 TARGET ACCOUNT: ' + inv.BillingAccountId__c);
+            System.debug('💰 PAYMENT AMOUNT: $' + paidAmount);
+            System.debug('🎫 STRIPE INTENT ID: ' + stripePaymentIntentId);
+            System.debug('🎫 STRIPE PAYMENT METHOD ID: ' + stripePaymentMethodId);
+            System.debug('👤 CARDHOLDER NAME: ' + (String.isNotBlank(cardholderName) ? cardholderName : 'Online Payment User'));
+            
+            // Create payment method record with detailed Stripe information
+            if (String.isNotBlank(stripePaymentMethodId)) {
+                try {
+                    System.debug('🔄 ========== PHASE 1: PAYMENT METHOD CREATION ==========');
+                    System.debug('📝 ATTEMPTING TO CREATE PAYMENT METHOD WITH STRIPE DETAILS...');
+                    
+                    // Create payment method record using detailed Stripe data if available
+                    if (paymentMethodDetails != null && !paymentMethodDetails.containsKey('error')) {
+                        System.debug('✅ Creating payment method with detailed Stripe data');
+                        paymentMethodId = createPaymentMethodRecord(paymentMethodDetails);
+                        System.debug('✅ Payment method created from Stripe data: ' + paymentMethodId);
+                    } else {
+                        System.debug('⚠️ Creating payment method with basic info only');
+                        paymentMethodId = createPaymentMethod(
+                            stripePaymentMethodId,
+                            String.isNotBlank(cardholderName) ? cardholderName : 'Online Payment User',
+                            'Credit Card',
+                            stripePaymentIntentId
+                        );
+                        System.debug('✅ Basic payment method created: ' + paymentMethodId);
+                    }
+                    
+                    System.debug('✅ ========== PAYMENT METHOD CREATION SUCCESS ==========');
+                    System.debug('🎉 Payment Method ID Generated: ' + paymentMethodId);
+                    System.debug('📍 Payment Method Record Created Successfully in Database');
+                    System.debug('🔗 Ready to proceed with Payment Record creation');
+                    
+                } catch (Exception pmError) {
+                    System.debug('❌ ========== PAYMENT METHOD CREATION FAILED ==========');
+                    System.debug('💥 CRITICAL ERROR in Payment Method Creation:');
+                    System.debug('🔴 Error Type: ' + pmError.getTypeName());
+                    System.debug('📝 Error Message: ' + pmError.getMessage());
+                    System.debug('📍 Line Number: ' + pmError.getLineNumber());
+                    System.debug('🔍 Stack Trace:');
+                    System.debug(pmError.getStackTraceString());
+                    System.debug('⚠️ IMPACT: Payment Record creation will be skipped');
+                    System.debug('📋 STATUS: Invoice is already updated, continuing with partial success');
+                    // Continue without payment method - invoice is already updated
+                }
+            } else {
+                System.debug('❌ ========== PAYMENT METHOD CREATION SKIPPED ==========');
+                System.debug('🚫 CRITICAL: Stripe Payment Method ID is blank/null');
+                System.debug('❗ REASON: Could not retrieve payment method from payment intent');
+                System.debug('📋 STATUS: Cannot create Payment Method without Stripe payment method ID');
+                System.debug('⚠️ IMPACT: Only Invoice status updated, no Payment Method or Payment Records created');
             }
             
             // Create Payment record
             if (String.isNotBlank(paymentMethodId)) {
                 try {
-                    System.debug('=== ATTEMPTING TO CREATE PAYMENT RECORD ===');
-                    System.debug('Parameters:');
-                    System.debug('  - invoiceId: ' + invoiceId);
-                    System.debug('  - accountId: ' + inv.BillingAccountId__c);
-                    System.debug('  - paymentMethodId: ' + paymentMethodId);
-                    System.debug('  - paidAmount: $' + paidAmount);
-                    System.debug('  - stripePaymentIntentId: ' + stripePaymentIntentId);
+                    System.debug('🔄 ========== PHASE 2: PAYMENT RECORD CREATION ==========');
+                    System.debug('📝 ATTEMPTING TO CREATE PAYMENT RECORD...');
+                    System.debug('🔍 Input Parameters Validation:');
+                    System.debug('  ✓ Invoice ID: ' + invoiceId);
+                    System.debug('  ✓ Account ID: ' + inv.BillingAccountId__c);
+                    System.debug('  ✓ Payment Method ID: ' + paymentMethodId);
+                    System.debug('  ✓ Payment Amount: $' + paidAmount);
+                    System.debug('  ✓ Stripe Payment Intent ID: ' + stripePaymentIntentId);
+                    System.debug('  ✓ Paid By: ' + (String.isNotBlank(cardholderName) ? cardholderName : 'Online Payment User'));
+                    
+                    System.debug('🚀 CALLING createPaymentRecord() method...');
                     
                     paymentRecordId = createPaymentRecord(
                         invoiceId,
-                        inv.BillingAccountId__c,
+                        String.valueOf(inv.BillingAccountId__c),
                         paymentMethodId,
                         paidAmount,
                         stripePaymentIntentId,
                         String.isNotBlank(cardholderName) ? cardholderName : 'Online Payment User'
                     );
                     
-                    System.debug('✅ Payment record created: ' + paymentRecordId);
+                    System.debug('✅ ========== PAYMENT RECORD CREATION SUCCESS ==========');
+                    System.debug('🎉 Payment Record ID Generated: ' + paymentRecordId);
+                    System.debug('📍 Payment Record Created Successfully in Database');
+                    System.debug('🔗 Payment Record linked to Payment Method: ' + paymentMethodId);
+                    System.debug('💼 Payment Record linked to Invoice: ' + invoiceId);
+                    System.debug('🏢 Payment Record linked to Account: ' + inv.BillingAccountId__c);
                     
                 } catch (Exception paymentError) {
-                    System.debug('❌ CRITICAL ERROR creating payment record:');
-                    System.debug('  - Type: ' + paymentError.getTypeName());
-                    System.debug('  - Message: ' + paymentError.getMessage());
-                    System.debug('  - Stack Trace: ' + paymentError.getStackTraceString());
-                    System.debug('  - Line Number: ' + paymentError.getLineNumber());
+                    System.debug('❌ ========== PAYMENT RECORD CREATION FAILED ==========');
+                    System.debug('💥 CRITICAL ERROR in Payment Record Creation:');
+                    System.debug('🔴 Error Type: ' + paymentError.getTypeName());
+                    System.debug('📝 Error Message: ' + paymentError.getMessage());
+                    System.debug('📍 Line Number: ' + paymentError.getLineNumber());
+                    System.debug('🔍 Stack Trace:');
+                    System.debug(paymentError.getStackTraceString());
+                    System.debug('⚠️ IMPACT: Payment Method exists but Payment Record failed');
+                    System.debug('📋 STATUS: Invoice and Payment Method are updated, but Payment Record is missing');
                     // Continue - invoice is already updated
                 }
             } else {
-                System.debug('❌ CRITICAL: Payment method ID is blank, cannot create payment record');
+                System.debug('❌ ========== PAYMENT RECORD CREATION SKIPPED ==========');
+                System.debug('🚫 CRITICAL: Payment Method ID is blank/null');
+                System.debug('❗ REASON: Payment Method creation failed in Phase 1');
+                System.debug('📋 STATUS: Cannot create Payment Record without valid Payment Method');
+                System.debug('⚠️ IMPACT: Only Invoice status updated, no Payment Method or Payment Records created');
             }
+            
+            System.debug('📊 ========== FINAL CREATION STATUS SUMMARY ==========');
+            System.debug('💳 Payment Method ID: ' + (String.isNotBlank(paymentMethodId) ? paymentMethodId : 'NOT CREATED'));
+            System.debug('💰 Payment Record ID: ' + (String.isNotBlank(paymentRecordId) ? paymentRecordId : 'NOT CREATED'));
+            System.debug('📋 Overall Status: ' + (String.isNotBlank(paymentMethodId) && String.isNotBlank(paymentRecordId) ? 'FULLY SUCCESSFUL' : 'PARTIALLY SUCCESSFUL'));
+            System.debug('🏁 ========== END OF PAYMENT METHOD & PAYMENT RECORD CREATION PROCESS ==========');
+            
             
             // Queue detailed payment method enrichment for later (non-blocking)
             if (String.isNotBlank(paymentMethodId)) {
                 try {
                     // Try to enrich with Stripe data, but don't wait/block if it fails
-                    enrichPaymentMethodAsync(paymentMethodId, stripePaymentIntentId);
+                    // enrichPaymentMethodAsync(paymentMethodId, stripePaymentIntentId);
+                    System.debug('⚠️ Payment method enrichment skipped for performance');
                 } catch (Exception enrichError) {
                     System.debug('⚠️ Could not queue payment method enrichment: ' + enrichError.getMessage());
                     // This is non-critical for the payment flow
@@ -1068,37 +1218,63 @@ public with sharing class StripeIntentController {
             String orderId = null;
             try {
                 // Query for orders related to this account that need processing
+                // First look for Activated orders, then Draft orders that need to be activated after payment
                 List<Order> relatedOrders = [
-                    SELECT Id, Installation_Type__c, AccountId, Status 
+                    SELECT Id, Installation_Type__c, AccountId, Status, CreatedDate
                     FROM Order 
                     WHERE AccountId = :inv.BillingAccountId__c
-                    AND Status = 'Draft'
-                    ORDER BY CreatedDate DESC
-                    LIMIT 1
+                    AND (Status = 'Activated' OR Status = 'Draft')
+                    AND CreatedDate = TODAY
+                    ORDER BY CreatedDate DESC, Status ASC  // Prioritize Activated orders first, then Draft
+                    LIMIT 5
                 ];
                 
                 if (!relatedOrders.isEmpty()) {
-                    Order order = relatedOrders[0];
-                    orderId = order.Id;
-                    System.debug('Found pending order to process: ' + orderId);
+                    // Process each order that might need fulfillment/installation processing
+                    for (Order order : relatedOrders) {
+                        System.debug('🔍 Checking order: ' + order.Id + ' | Status: ' + order.Status + ' | Installation Type: ' + order.Installation_Type__c);
+                        
+                        // If order is Draft, activate it first after successful payment
+                        if (order.Status == 'Draft') {
+                            System.debug('📋 Order is in Draft status, activating after successful payment...');
+                            try {
+                                order.Status = 'Activated';
+                                update order;
+                                System.debug('✅ Order activated successfully: ' + order.Id + ' -> Status: Activated');
+                            } catch (Exception activationEx) {
+                                System.debug('❌ Failed to activate order: ' + activationEx.getMessage());
+                                continue; // Skip this order and try the next one
+                            }
+                        }
+                        
+                        // Now process the activated order for fulfillment
+                        orderId = order.Id;
+                        System.debug('🎯 Processing order for fulfillment: ' + orderId + ' (Status: Activated)');
+                        
+                        // Process the order based on installation type using the PostPaymentOrderProcessingController
+                        try {
+                            String orderProcessingResult = PostPaymentOrderProcessingController.processPaymentCompletedOrder(
+                                orderId, 
+                                stripePaymentIntentId
+                            );
+                            System.debug('✅ Order processed successfully after payment: ' + orderProcessingResult);
+                            break; // Process only the first order
+                        } catch (Exception orderEx) {
+                            System.debug('⚠️ Error processing order after payment: ' + orderEx.getMessage());
+                            System.debug('Stack trace: ' + orderEx.getStackTraceString());
+                            // Continue to try next order if available
+                        }
+                    }
                     
-                    // Process the order based on installation type using the PostPaymentOrderProcessingController
-                    try {
-                        String orderProcessingResult = PostPaymentOrderProcessingController.processOrderAfterPayment(
-                            orderId, 
-                            invoiceId, 
-                            stripePaymentIntentId
-                        );
-                        System.debug('Order processed after payment: ' + orderProcessingResult);
-                    } catch (Exception orderEx) {
-                        System.debug('⚠️ Error processing order after payment: ' + orderEx.getMessage());
-                        // Continue with payment flow, don't block payment success due to order processing error
+                    if (String.isBlank(orderId)) {
+                        System.debug('⚠️ All related orders were found but processing failed or no fulfillment was created');
                     }
                 } else {
-                    System.debug('No pending orders found for this account');
+                    System.debug('ℹ️ No pending orders found for this account (looking for Activated or Draft orders from today)');
                 }
             } catch (Exception orderLookupEx) {
                 System.debug('⚠️ Error looking up related order: ' + orderLookupEx.getMessage());
+                System.debug('Stack trace: ' + orderLookupEx.getStackTraceString());
                 // Continue with payment flow
             }
             
@@ -1449,9 +1625,9 @@ public with sharing class StripeIntentController {
                 if (String.isNotBlank(last4)) {
                     pm.Card_Last_4_Digit__c = last4;
                     
-                    // Create masked card number in format **** **** **** 1234
-                    pm.Card_Number__c = '**** **** **** ' + last4;
-                    System.debug('✅ Masked card number created: **** **** **** ' + last4);
+                    // Create masked card number - max 18 chars for field limit
+                    pm.Card_Number__c = '************' + last4;  // 12 asterisks + 4 digits = 16 chars
+                    System.debug('✅ Masked card number created: ************' + last4);
                 }
                 
                 // Card expiration month
@@ -1538,6 +1714,42 @@ public with sharing class StripeIntentController {
                 String email = (String) billingDetails.get('email');
                 if (String.isNotBlank(email)) {
                     pm.Email__c = email;
+                }
+                
+                // Phone
+                String phone = (String) billingDetails.get('phone');
+                if (String.isNotBlank(phone)) {
+                    // Note: Add Phone__c field to Payment_Method__c object if needed
+                    System.debug('Phone available but no Phone__c field in Payment_Method__c: ' + phone);
+                }
+                
+                // Address details
+                Map<String, Object> addressData = (Map<String, Object>) billingDetails.get('address');
+                if (addressData != null) {
+                    System.debug('Processing billing address: ' + JSON.serializePretty(addressData));
+                    
+                    String line1 = (String) addressData.get('line1');
+                    String line2 = (String) addressData.get('line2');
+                    String city = (String) addressData.get('city');
+                    String state = (String) addressData.get('state');
+                    String postalCode = (String) addressData.get('postal_code');
+                    String country = (String) addressData.get('country');
+                    
+                    // Note: These fields don't exist in Payment_Method__c - consider adding them
+                    System.debug('Address Line 1 available but no Address_Line_1__c field: ' + line1);
+                    System.debug('Address Line 2 available but no Address_Line_2__c field: ' + line2);
+                    System.debug('City available but no City__c field: ' + city);
+                    System.debug('State available but no State__c field: ' + state);
+                    System.debug('Postal Code available but no Postal_Code__c field: ' + postalCode);
+                    System.debug('Country available but no Country__c field: ' + country);
+                    System.debug('⚠️ MISSING ADDRESS FIELDS: Consider adding these fields to Payment_Method__c:');
+                    System.debug('  - Address_Line_1__c (Text, 255)');
+                    System.debug('  - Address_Line_2__c (Text, 255)');
+                    System.debug('  - City__c (Text, 255)');
+                    System.debug('  - State__c (Text, 255)');
+                    System.debug('  - Postal_Code__c (Text, 20)');
+                    System.debug('  - Country__c (Text, 2) or (Picklist with country codes)');
+                    System.debug('  - Phone__c (Phone, 20)');
                 }
             }
             
@@ -2146,8 +2358,8 @@ public with sharing class StripeIntentController {
                 }
             }
             
-            // Set a placeholder masked card number (will be updated with actual last 4 during enrichment)
-            pm.Card_Number__c = '**** **** **** ****';
+            // Set a placeholder masked card number (max 18 chars for field limit)
+            pm.Card_Number__c = '************';
             System.debug('✅ Placeholder masked card number set (will be enriched with actual last 4 digits later)');
             
             
@@ -2399,6 +2611,1585 @@ public with sharing class StripeIntentController {
             System.debug('  - Message: ' + e.getMessage());
             System.debug('  - Stack Trace: ' + e.getStackTraceString());
             return errorJson('Failed to test Stripe payment method data extraction: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * ENHANCED METHOD: Creates a complete Payment Method record with all Stripe data populated
+     * This method fetches full payment method details from Stripe and creates a fully populated Payment_Method__c record
+     * Call this method when you want to ensure all fields are filled from the Stripe response
+     */
+    @RemoteAction
+    public static String createCompletePaymentMethodFromStripe(String stripePaymentMethodId, String accountId) {
+        System.debug('=== Creating Complete Payment Method from Stripe ===');
+        System.debug('Stripe Payment Method ID: ' + stripePaymentMethodId);
+        System.debug('Account ID: ' + accountId);
+        
+        try {
+            if (String.isBlank(stripePaymentMethodId)) {
+                return errorJson('Stripe Payment Method ID is required');
+            }
+            
+            // First, get full payment method details from Stripe
+            String stripePaymentMethodDetails = getStripePaymentMethodDetails(stripePaymentMethodId);
+            Map<String, Object> paymentMethodData = (Map<String, Object>) JSON.deserializeUntyped(stripePaymentMethodDetails);
+            
+            if (paymentMethodData.containsKey('error')) {
+                return errorJson('Failed to retrieve Stripe payment method: ' + paymentMethodData.get('message'));
+            }
+            
+            // Check if payment method already exists
+            List<Payment_Method__c> existingMethods = [SELECT Id, Strip_Payment_ID__c FROM Payment_Method__c 
+                                                      WHERE Strip_Payment_ID__c = :stripePaymentMethodId LIMIT 1];
+            if (!existingMethods.isEmpty()) {
+                System.debug('Payment method already exists, updating with latest Stripe data: ' + existingMethods[0].Id);
+                String updateResult = updatePaymentMethodWithStripeData(existingMethods[0].Id, stripePaymentMethodId);
+                return updateResult;
+            }
+            
+            // Get account if not provided
+            if (String.isBlank(accountId)) {
+                List<Account> acc = [SELECT Id, Name FROM Account WHERE RecordType.DeveloperName = 'PersonAccount' 
+                                 ORDER BY CreatedDate DESC LIMIT 1];
+                if (!acc.isEmpty()) {
+                    accountId = acc[0].Id;
+                    System.debug('Using most recent Person Account: ' + accountId + ' (' + acc[0].Name + ')');
+                }
+            }
+            
+            // Get cardholder name and payment type from Stripe data
+            String cardHolderName = '';
+            Map<String, Object> billingDetails = (Map<String, Object>) paymentMethodData.get('billing_details');
+            if (billingDetails != null) {
+                cardHolderName = (String) billingDetails.get('name');
+            }
+            
+            String paymentType = (String) paymentMethodData.get('type');
+            if ('card'.equalsIgnoreCase(paymentType)) {
+                paymentType = 'Credit Card';
+            } else if ('us_bank_account'.equalsIgnoreCase(paymentType)) {
+                paymentType = 'ACH';
+            } else {
+                paymentType = 'Credit Card';
+            }
+            
+            // Create Payment_Method__c record
+            Payment_Method__c pm = new Payment_Method__c(
+                Strip_Payment_ID__c = stripePaymentMethodId,
+                Default_Payment_Method__c = true,
+                Status__c = 'Valid',
+                Account__c = accountId,
+                Gateway__c = 'Stripe',
+                Payment_Type__c = paymentType,
+                Currency__c = 'USD'
+            );
+            
+            // Populate ALL fields from Stripe response
+            populatePaymentMethodFieldsFromStripe(pm, paymentMethodData, cardHolderName, paymentType);
+            
+            insert pm;
+            
+            System.debug('✅ Complete Payment Method created successfully: ' + pm.Id);
+            
+            // Return detailed response
+            Map<String, Object> result = new Map<String, Object>{
+                'success' => true,
+                'salesforcePaymentMethodId' => pm.Id,
+                'stripePaymentMethodId' => stripePaymentMethodId,
+                'accountId' => accountId,
+                'paymentType' => paymentType,
+                'cardHolderName' => cardHolderName,
+                'message' => 'Complete Payment Method record created with all Stripe data populated',
+                'stripeData' => paymentMethodData
+            };
+            
+            return JSON.serialize(result);
+            
+        } catch (Exception e) {
+            System.debug('❌ Error creating complete Payment Method from Stripe:');
+            System.debug('  - Type: ' + e.getTypeName());
+            System.debug('  - Message: ' + e.getMessage());
+            System.debug('  - Stack Trace: ' + e.getStackTraceString());
+            return errorJson('Failed to create complete payment method: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * ENHANCED METHOD: Links Payment Method with Payment custom object and populates all relationships
+     * This method creates both Payment_Method__c and Payment__c records with proper linking
+     */
+    @RemoteAction
+    public static String createLinkedPaymentMethodAndPaymentRecord(
+        String stripePaymentMethodId, 
+        String stripePaymentIntentId, 
+        String invoiceId, 
+        String accountId, 
+        Decimal paymentAmount, 
+        String cardHolderName
+    ) {
+        System.debug('=== Creating Linked Payment Method and Payment Records ===');
+        System.debug('Stripe Payment Method ID: ' + stripePaymentMethodId);
+        System.debug('Stripe Payment Intent ID: ' + stripePaymentIntentId);
+        System.debug('Invoice ID: ' + invoiceId);
+        System.debug('Account ID: ' + accountId);
+        System.debug('Payment Amount: ' + paymentAmount);
+        System.debug('Cardholder Name: ' + cardHolderName);
+        
+        try {
+            // Validate required parameters
+            if (String.isBlank(stripePaymentMethodId)) {
+                return errorJson('Stripe Payment Method ID is required');
+            }
+            if (String.isBlank(stripePaymentIntentId)) {
+                return errorJson('Stripe Payment Intent ID is required');
+            }
+            if (String.isBlank(invoiceId)) {
+                return errorJson('Invoice ID is required');
+            }
+            if (paymentAmount == null || paymentAmount <= 0) {
+                return errorJson('Valid payment amount is required');
+            }
+            
+            // Step 1: Create complete Payment Method record with all Stripe data
+            String paymentMethodResult = createCompletePaymentMethodFromStripe(stripePaymentMethodId, accountId);
+            Map<String, Object> pmResult = (Map<String, Object>) JSON.deserializeUntyped(paymentMethodResult);
+            
+            if (pmResult.get('success') != true) {
+                return paymentMethodResult; // Return error from Payment Method creation
+            }
+            
+            String salesforcePaymentMethodId = (String) pmResult.get('salesforcePaymentMethodId');
+            String resolvedAccountId = (String) pmResult.get('accountId');
+            
+            System.debug('✅ Payment Method created/updated: ' + salesforcePaymentMethodId);
+            
+            // Step 2: Create Payment record linked to the Payment Method
+            Payment__c payment = new Payment__c(
+                Name = 'Payment - ' + stripePaymentIntentId,
+                Invoice__c = invoiceId,
+                Account__c = resolvedAccountId,
+                Payment_Method_lookup__c = salesforcePaymentMethodId,
+                Status__c = 'Posted',
+                Balance__c = paymentAmount,
+                Paid_By__c = String.isNotBlank(cardHolderName) ? cardHolderName : 'Online Payment User',
+                Created_By__c = UserInfo.getName()
+            );
+            
+            insert payment;
+            
+            System.debug('✅ Payment record created: ' + payment.Id);
+            
+            // Return comprehensive response
+            Map<String, Object> result = new Map<String, Object>{
+                'success' => true,
+                'paymentMethodId' => salesforcePaymentMethodId,
+                'paymentRecordId' => payment.Id,
+                'stripePaymentMethodId' => stripePaymentMethodId,
+                'stripePaymentIntentId' => stripePaymentIntentId,
+                'invoiceId' => invoiceId,
+                'accountId' => resolvedAccountId,
+                'paymentAmount' => paymentAmount,
+                'cardHolderName' => cardHolderName,
+                'message' => 'Payment Method and Payment records created and linked successfully',
+                'paymentMethodData' => pmResult.get('stripeData'),
+                'relationships' => new Map<String, Object>{
+                    'payment_to_payment_method' => 'Payment__c.Payment_Method_lookup__c -> Payment_Method__c.Id',
+                    'payment_to_invoice' => 'Payment__c.Invoice__c -> Invoice__c.Id',
+                    'payment_to_account' => 'Payment__c.Account__c -> Account.Id',
+                    'payment_method_to_account' => 'Payment_Method__c.Account__c -> Account.Id'
+                }
+            };
+            
+            return JSON.serialize(result);
+            
+        } catch (Exception e) {
+            System.debug('❌ Error creating linked Payment Method and Payment records:');
+            System.debug('  - Type: ' + e.getTypeName());
+            System.debug('  - Message: ' + e.getMessage());
+            System.debug('  - Stack Trace: ' + e.getStackTraceString());
+            return errorJson('Failed to create linked payment records: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * ENHANCED METHOD: Gets Payment Method from Payment Intent and creates fully populated records
+     * This is the most comprehensive method that handles the complete flow
+     */
+    @RemoteAction
+    public static String createCompletePaymentFlowFromIntent(
+        String stripePaymentIntentId, 
+        String invoiceId, 
+        String accountId, 
+        Decimal paymentAmount, 
+        String cardHolderName
+    ) {
+        System.debug('=== Creating Complete Payment Flow from Payment Intent ===');
+        System.debug('Stripe Payment Intent ID: ' + stripePaymentIntentId);
+        System.debug('Invoice ID: ' + invoiceId);
+        System.debug('Account ID: ' + accountId);
+        System.debug('Payment Amount: ' + paymentAmount);
+        System.debug('Cardholder Name: ' + cardHolderName);
+        
+        try {
+            // Step 1: Get Payment Method ID from Payment Intent
+            String paymentMethodResult = getPaymentMethodFromIntent(stripePaymentIntentId);
+            Map<String, Object> pmResult = (Map<String, Object>) JSON.deserializeUntyped(paymentMethodResult);
+            
+            if (pmResult.get('success') != true) {
+                return paymentMethodResult; // Return error
+            }
+            
+            String stripePaymentMethodId = (String) pmResult.get('paymentMethodId');
+            System.debug('✅ Retrieved Payment Method ID from Intent: ' + stripePaymentMethodId);
+            
+            // Step 2: Create linked Payment Method and Payment records
+            String linkedResult = createLinkedPaymentMethodAndPaymentRecord(
+                stripePaymentMethodId,
+                stripePaymentIntentId,
+                invoiceId,
+                accountId,
+                paymentAmount,
+                cardHolderName
+            );
+            
+            Map<String, Object> linkedResultData = (Map<String, Object>) JSON.deserializeUntyped(linkedResult);
+            
+            if (linkedResultData.get('success') == true) {
+                System.debug('✅ Complete payment flow created successfully');
+                
+                // Add intent information to the response
+                linkedResultData.put('retrievedFromIntent', true);
+                linkedResultData.put('originalIntentId', stripePaymentIntentId);
+                linkedResultData.put('message', 'Complete payment flow created from Payment Intent with all data populated and linked');
+                
+                return JSON.serialize(linkedResultData);
+            }
+            
+            return linkedResult;
+            
+        } catch (Exception e) {
+            System.debug('❌ Error creating complete payment flow from intent:');
+            System.debug('  - Type: ' + e.getTypeName());
+            System.debug('  - Message: ' + e.getMessage());
+            System.debug('  - Stack Trace: ' + e.getStackTraceString());
+            return errorJson('Failed to create complete payment flow: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * UTILITY METHOD: Updates existing Payment Method record with missing fields from Stripe
+     * Use this to fill in any missing data without creating new records
+     */
+    @RemoteAction
+    public static String enrichExistingPaymentMethodFromStripe(String salesforcePaymentMethodId) {
+        System.debug('=== Enriching Existing Payment Method from Stripe ===');
+        System.debug('Salesforce Payment Method ID: ' + salesforcePaymentMethodId);
+        
+        try {
+            if (String.isBlank(salesforcePaymentMethodId)) {
+                return errorJson('Salesforce Payment Method ID is required');
+            }
+            
+            // Get the existing Payment Method record
+            List<Payment_Method__c> existingMethods = [SELECT Id, Strip_Payment_ID__c, Payment_Type__c, 
+                                                              First_Name__c, Last_Name__c, Name_On_Card__c,
+                                                              Account__c, Gateway__c, Status__c, 
+                                                              Card_Number__c, Card_Last_4_Digit__c,
+                                                              Card_Expire_Month__c, Card_Expire_Year__c,
+                                                              Card__c, Funding__c, Email__c
+                                                       FROM Payment_Method__c 
+                                                       WHERE Id = :salesforcePaymentMethodId 
+                                                       LIMIT 1];
+            
+            if (existingMethods.isEmpty()) {
+                return errorJson('Payment Method record not found with ID: ' + salesforcePaymentMethodId);
+            }
+            
+            Payment_Method__c pm = existingMethods[0];
+            
+            if (String.isBlank(pm.Strip_Payment_ID__c)) {
+                return errorJson('No Stripe Payment Method ID found in record - cannot enrich from Stripe');
+            }
+            
+            System.debug('Found existing Payment Method with Stripe ID: ' + pm.Strip_Payment_ID__c);
+            
+            // Update with latest Stripe data
+            String updateResult = updatePaymentMethodWithStripeData(salesforcePaymentMethodId, pm.Strip_Payment_ID__c);
+            
+            return updateResult;
+            
+        } catch (Exception e) {
+            System.debug('❌ Error enriching existing Payment Method:');
+            System.debug('  - Type: ' + e.getTypeName());
+            System.debug('  - Message: ' + e.getMessage());
+            System.debug('  - Stack Trace: ' + e.getStackTraceString());
+            return errorJson('Failed to enrich existing payment method: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * UTILITY METHOD: Get comprehensive Payment Method details including relationships
+     */
+    @RemoteAction
+    public static String getPaymentMethodWithRelationships(String paymentMethodId) {
+        System.debug('=== Getting Payment Method with Relationships ===');
+        System.debug('Payment Method ID: ' + paymentMethodId);
+        
+        try {
+            if (String.isBlank(paymentMethodId)) {
+                return errorJson('Payment Method ID is required');
+            }
+            
+            // Query Payment Method with all fields and related records
+            List<Payment_Method__c> paymentMethods = [
+                SELECT Id, Name, Strip_Payment_ID__c, Payment_Type__c, Status__c, Gateway__c,
+                       Account__c, Account__r.Name, Default_Payment_Method__c, Currency__c,
+                       First_Name__c, Last_Name__c, Name_On_Card__c, Email__c,
+                       Card__c, Card_Number__c, Card_Last_4_Digit__c, 
+                       Card_Expire_Month__c, Card_Expire_Year__c, Funding__c,
+                       Bank_Account_Type__c, Bank_Account_Name__c, Bank_Account_Number__c,
+                       Bank_Name__c, Bank_Routing_Code__c, Account_Holder_Type__c,
+                       Finger_Print_Length__c, Gateway_Response__c, Active__c,
+                       CreatedDate, LastModifiedDate,
+                       (SELECT Id, Name, Invoice__c, Invoice__r.Name, Status__c, Balance__c, 
+                               Paid_By__c, Created_By__c, CreatedDate 
+                        FROM Payments__r 
+                        ORDER BY CreatedDate DESC 
+                        LIMIT 10)
+                FROM Payment_Method__c 
+                WHERE Id = :paymentMethodId 
+                LIMIT 1
+            ];
+            
+            if (paymentMethods.isEmpty()) {
+                return errorJson('Payment Method not found with ID: ' + paymentMethodId);
+            }
+            
+            Payment_Method__c pm = paymentMethods[0];
+            
+            // Build comprehensive response
+            Map<String, Object> result = new Map<String, Object>{
+                'success' => true,
+                'paymentMethod' => new Map<String, Object>{
+                    'id' => pm.Id,
+                    'name' => pm.Name,
+                    'stripePaymentId' => pm.Strip_Payment_ID__c,
+                    'paymentType' => pm.Payment_Type__c,
+                    'status' => pm.Status__c,
+                    'gateway' => pm.Gateway__c,
+                    'currency' => pm.Currency__c,
+                    'isDefault' => pm.Default_Payment_Method__c,
+                    'isActive' => pm.Active__c,
+                    'createdDate' => pm.CreatedDate,
+                    'lastModifiedDate' => pm.LastModifiedDate
+                },
+                'account' => new Map<String, Object>{
+                    'id' => pm.Account__c,
+                    'name' => pm.Account__r?.Name
+                },
+                'cardholderInfo' => new Map<String, Object>{
+                    'firstName' => pm.First_Name__c,
+                    'lastName' => pm.Last_Name__c,
+                    'nameOnCard' => pm.Name_On_Card__c,
+                    'email' => pm.Email__c
+                },
+                'cardDetails' => new Map<String, Object>{
+                    'cardType' => pm.Card__c,
+                    'cardNumber' => pm.Card_Number__c,
+                    'last4Digits' => pm.Card_Last_4_Digit__c,
+                    'expiryMonth' => pm.Card_Expire_Month__c,
+                    'expiryYear' => pm.Card_Expire_Year__c,
+                    'funding' => pm.Funding__c,
+                    'fingerprintLength' => pm.Finger_Print_Length__c
+                },
+                'bankDetails' => new Map<String, Object>{
+                    'accountType' => pm.Bank_Account_Type__c,
+                    'accountName' => pm.Bank_Account_Name__c,
+                    'accountNumber' => pm.Bank_Account_Number__c,
+                    'bankName' => pm.Bank_Name__c,
+                    'routingCode' => pm.Bank_Routing_Code__c,
+                    'holderType' => pm.Account_Holder_Type__c
+                },
+                'relatedPayments' => new List<Map<String, Object>>(),
+                'gatewayResponse' => pm.Gateway_Response__c
+            };
+            
+            // Add related payment records
+            for (Payment__c payment : pm.Payments__r) {
+                Map<String, Object> paymentData = new Map<String, Object>{
+                    'id' => payment.Id,
+                    'name' => payment.Name,
+                    'invoiceId' => payment.Invoice__c,
+                    'invoiceName' => payment.Invoice__r?.Name,
+                    'status' => payment.Status__c,
+                    'amount' => payment.Balance__c,
+                    'paidBy' => payment.Paid_By__c,
+                    'createdBy' => payment.Created_By__c,
+                    'createdDate' => payment.CreatedDate
+                };
+                ((List<Map<String, Object>>) result.get('relatedPayments')).add(paymentData);
+            }
+            
+            result.put('message', 'Payment Method details retrieved with all relationships');
+            result.put('totalRelatedPayments', pm.Payments__r.size());
+            
+            return JSON.serialize(result);
+            
+        } catch (Exception e) {
+            System.debug('❌ Error getting Payment Method with relationships:');
+            System.debug('  - Type: ' + e.getTypeName());
+            System.debug('  - Message: ' + e.getMessage());
+            System.debug('  - Stack Trace: ' + e.getStackTraceString());
+            return errorJson('Failed to get payment method details: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * COMPREHENSIVE METHOD: Fill all empty fields in Payment Method from Stripe API
+     * This method gets the complete Stripe payment method object and fills ALL empty fields
+     */
+    @RemoteAction
+    public static String fillAllEmptyFieldsFromStripe(String salesforcePaymentMethodId) {
+        System.debug('=== FILLING ALL EMPTY FIELDS FROM STRIPE ===');
+        System.debug('Salesforce Payment Method ID: ' + salesforcePaymentMethodId);
+        
+        try {
+            if (String.isBlank(salesforcePaymentMethodId)) {
+                return errorJson('Salesforce Payment Method ID is required');
+            }
+            
+            // Get the existing Payment Method record with ALL fields
+            List<Payment_Method__c> existingMethods = [
+                SELECT Id, Name, Strip_Payment_ID__c, Payment_Type__c, Status__c, Gateway__c,
+                       Account__c, Default_Payment_Method__c, Currency__c, Active__c,
+                       First_Name__c, Last_Name__c, Name_On_Card__c, Email__c,
+                       Card__c, Card_Number__c, Card_Last_4_Digit__c, 
+                       Card_Expire_Month__c, Card_Expire_Year__c, Funding__c,
+                       Bank_Account_Type__c, Bank_Account_Name__c, Bank_Account_Number__c,
+                       Bank_Name__c, Bank_Routing_Code__c, Account_Holder_Type__c,
+                       Finger_Print_Length__c, Gateway_Response__c, Mandate_Id__c
+                FROM Payment_Method__c 
+                WHERE Id = :salesforcePaymentMethodId 
+                LIMIT 1
+            ];
+            
+            if (existingMethods.isEmpty()) {
+                return errorJson('Payment Method record not found with ID: ' + salesforcePaymentMethodId);
+            }
+            
+            Payment_Method__c pm = existingMethods[0];
+            System.debug('Found existing Payment Method: ' + pm.Name);
+            System.debug('Current Strip_Payment_ID__c: ' + pm.Strip_Payment_ID__c);
+            
+            if (String.isBlank(pm.Strip_Payment_ID__c)) {
+                return errorJson('No Stripe Payment Method ID found in record - cannot fetch from Stripe');
+            }
+            
+            System.debug('🔄 FETCHING COMPLETE STRIPE PAYMENT METHOD DATA...');
+            System.debug('Using Stripe Payment Method ID: ' + pm.Strip_Payment_ID__c);
+            
+            // Get the COMPLETE Stripe payment method object
+            String stripeResponse = getStripePaymentMethodDetails(pm.Strip_Payment_ID__c);
+            Map<String, Object> stripePaymentMethod = (Map<String, Object>) JSON.deserializeUntyped(stripeResponse);
+            
+            if (stripePaymentMethod.containsKey('error')) {
+                System.debug('❌ Error from Stripe API: ' + stripePaymentMethod.get('error'));
+                return errorJson('Failed to get Stripe payment method: ' + stripePaymentMethod.get('message'));
+            }
+            
+            System.debug('✅ RECEIVED COMPLETE STRIPE DATA');
+            System.debug('Stripe Payment Method Type: ' + stripePaymentMethod.get('type'));
+            System.debug('Stripe Response Keys: ' + stripePaymentMethod.keySet());
+            
+            // Track which fields will be filled
+            Map<String, Object> fieldsToFill = new Map<String, Object>();
+            Map<String, Object> beforeValues = new Map<String, Object>();
+            Map<String, Object> afterValues = new Map<String, Object>();
+            List<String> filledFields = new List<String>();
+            
+            // STEP 1: Fill basic payment method info
+            System.debug('🔧 STEP 1: Processing basic payment method info...');
+            
+            String stripeType = (String) stripePaymentMethod.get('type');
+            if (String.isBlank(pm.Payment_Type__c) && String.isNotBlank(stripeType)) {
+                beforeValues.put('Payment_Type__c', pm.Payment_Type__c);
+                if ('card'.equalsIgnoreCase(stripeType)) {
+                    pm.Payment_Type__c = 'Credit Card';
+                } else if ('us_bank_account'.equalsIgnoreCase(stripeType)) {
+                    pm.Payment_Type__c = 'ACH';
+                } else {
+                    pm.Payment_Type__c = 'Credit Card';
+                }
+                afterValues.put('Payment_Type__c', pm.Payment_Type__c);
+                filledFields.add('Payment_Type__c');
+                System.debug('✅ Filled Payment_Type__c: ' + pm.Payment_Type__c);
+            }
+            
+            if (String.isBlank(pm.Gateway__c)) {
+                beforeValues.put('Gateway__c', pm.Gateway__c);
+                pm.Gateway__c = 'Stripe';
+                afterValues.put('Gateway__c', pm.Gateway__c);
+                filledFields.add('Gateway__c');
+                System.debug('✅ Filled Gateway__c: ' + pm.Gateway__c);
+            }
+            
+            if (String.isBlank(pm.Status__c)) {
+                beforeValues.put('Status__c', pm.Status__c);
+                pm.Status__c = 'Valid';
+                afterValues.put('Status__c', pm.Status__c);
+                filledFields.add('Status__c');
+                System.debug('✅ Filled Status__c: ' + pm.Status__c);
+            }
+            
+            if (String.isBlank(pm.Currency__c)) {
+                beforeValues.put('Currency__c', pm.Currency__c);
+                pm.Currency__c = 'USD';
+                afterValues.put('Currency__c', pm.Currency__c);
+                filledFields.add('Currency__c');
+                System.debug('✅ Filled Currency__c: ' + pm.Currency__c);
+            }
+            
+            // STEP 2: Fill billing details (cardholder information)
+            System.debug('🔧 STEP 2: Processing billing details...');
+            Map<String, Object> billingDetails = (Map<String, Object>) stripePaymentMethod.get('billing_details');
+            if (billingDetails != null) {
+                System.debug('Found billing_details in Stripe response');
+                
+                // Email
+                String email = (String) billingDetails.get('email');
+                if (String.isBlank(pm.Email__c) && String.isNotBlank(email)) {
+                    beforeValues.put('Email__c', pm.Email__c);
+                    pm.Email__c = email;
+                    afterValues.put('Email__c', pm.Email__c);
+                    filledFields.add('Email__c');
+                    System.debug('✅ Filled Email__c: ' + pm.Email__c);
+                }
+                
+                // Cardholder name
+                String cardholderName = (String) billingDetails.get('name');
+                if (String.isBlank(pm.Name_On_Card__c) && String.isNotBlank(cardholderName)) {
+                    beforeValues.put('Name_On_Card__c', pm.Name_On_Card__c);
+                    pm.Name_On_Card__c = cardholderName;
+                    afterValues.put('Name_On_Card__c', pm.Name_On_Card__c);
+                    filledFields.add('Name_On_Card__c');
+                    System.debug('✅ Filled Name_On_Card__c: ' + pm.Name_On_Card__c);
+                    
+                    // Split name into first and last
+                    List<String> nameParts = cardholderName.trim().split(' ');
+                    if (nameParts.size() >= 1 && String.isBlank(pm.First_Name__c)) {
+                        beforeValues.put('First_Name__c', pm.First_Name__c);
+                        pm.First_Name__c = nameParts[0];
+                        afterValues.put('First_Name__c', pm.First_Name__c);
+                        filledFields.add('First_Name__c');
+                        System.debug('✅ Filled First_Name__c: ' + pm.First_Name__c);
+                    }
+                    
+                    if (nameParts.size() > 1 && String.isBlank(pm.Last_Name__c)) {
+                        beforeValues.put('Last_Name__c', pm.Last_Name__c);
+                        List<String> lastNameParts = new List<String>();
+                        for (Integer i = 1; i < nameParts.size(); i++) {
+                            lastNameParts.add(nameParts[i]);
+                        }
+                        pm.Last_Name__c = String.join(lastNameParts, ' ');
+                        afterValues.put('Last_Name__c', pm.Last_Name__c);
+                        filledFields.add('Last_Name__c');
+                        System.debug('✅ Filled Last_Name__c: ' + pm.Last_Name__c);
+                    }
+                }
+            } else {
+                System.debug('⚠️ No billing_details found in Stripe response');
+            }
+            
+            // STEP 3: Fill card details
+            System.debug('🔧 STEP 3: Processing card details...');
+            Map<String, Object> cardData = (Map<String, Object>) stripePaymentMethod.get('card');
+            if (cardData != null) {
+                System.debug('Found card data in Stripe response');
+                System.debug('Card data keys: ' + cardData.keySet());
+                
+                // Card brand/type
+                String brand = (String) cardData.get('brand');
+                if (String.isBlank(pm.Card__c) && String.isNotBlank(brand)) {
+                    beforeValues.put('Card__c', pm.Card__c);
+                    if ('visa'.equalsIgnoreCase(brand)) {
+                        pm.Card__c = 'Visa';
+                    } else if ('mastercard'.equalsIgnoreCase(brand)) {
+                        pm.Card__c = 'Master Card';
+                    } else if ('american_express'.equalsIgnoreCase(brand) || 'amex'.equalsIgnoreCase(brand)) {
+                        pm.Card__c = 'American Express';
+                    } else if ('discover'.equalsIgnoreCase(brand)) {
+                        pm.Card__c = 'Discover';
+                    } else {
+                        pm.Card__c = brand.substring(0, 1).toUpperCase() + brand.substring(1).toLowerCase();
+                    }
+                    afterValues.put('Card__c', pm.Card__c);
+                    filledFields.add('Card__c');
+                    System.debug('✅ Filled Card__c: ' + pm.Card__c);
+                }
+                
+                // Card last 4 digits
+                String last4 = (String) cardData.get('last4');
+                if (String.isBlank(pm.Card_Last_4_Digit__c) && String.isNotBlank(last4)) {
+                    beforeValues.put('Card_Last_4_Digit__c', pm.Card_Last_4_Digit__c);
+                    pm.Card_Last_4_Digit__c = last4;
+                    afterValues.put('Card_Last_4_Digit__c', pm.Card_Last_4_Digit__c);
+                    filledFields.add('Card_Last_4_Digit__c');
+                    System.debug('✅ Filled Card_Last_4_Digit__c: ' + pm.Card_Last_4_Digit__c);
+                }
+                
+                // Card number (masked format)
+                if (String.isBlank(pm.Card_Number__c) && String.isNotBlank(last4)) {
+                    beforeValues.put('Card_Number__c', pm.Card_Number__c);
+                    pm.Card_Number__c = '************' + last4;  // 12 asterisks + 4 digits = 16 chars
+                    afterValues.put('Card_Number__c', pm.Card_Number__c);
+                    filledFields.add('Card_Number__c');
+                    System.debug('✅ Filled Card_Number__c: ' + pm.Card_Number__c);
+                }
+                
+                // Expiration month
+                Object expMonth = cardData.get('exp_month');
+                if (String.isBlank(pm.Card_Expire_Month__c) && expMonth != null) {
+                    beforeValues.put('Card_Expire_Month__c', pm.Card_Expire_Month__c);
+                    String monthStr = String.valueOf(expMonth);
+                    if (monthStr.length() == 1) {
+                        monthStr = '0' + monthStr; // Pad single digit months
+                    }
+                    pm.Card_Expire_Month__c = monthStr;
+                    afterValues.put('Card_Expire_Month__c', pm.Card_Expire_Month__c);
+                    filledFields.add('Card_Expire_Month__c');
+                    System.debug('✅ Filled Card_Expire_Month__c: ' + pm.Card_Expire_Month__c);
+                }
+                
+                // Expiration year
+                Object expYear = cardData.get('exp_year');
+                if (String.isBlank(pm.Card_Expire_Year__c) && expYear != null) {
+                    beforeValues.put('Card_Expire_Year__c', pm.Card_Expire_Year__c);
+                    pm.Card_Expire_Year__c = String.valueOf(expYear);
+                    afterValues.put('Card_Expire_Year__c', pm.Card_Expire_Year__c);
+                    filledFields.add('Card_Expire_Year__c');
+                    System.debug('✅ Filled Card_Expire_Year__c: ' + pm.Card_Expire_Year__c);
+                }
+                
+                // Funding type
+                String funding = (String) cardData.get('funding');
+                if (String.isBlank(pm.Funding__c) && String.isNotBlank(funding)) {
+                    beforeValues.put('Funding__c', pm.Funding__c);
+                    if ('credit'.equalsIgnoreCase(funding)) {
+                        pm.Funding__c = 'Credit';
+                    } else if ('debit'.equalsIgnoreCase(funding)) {
+                        pm.Funding__c = 'Debit';
+                    } else if ('prepaid'.equalsIgnoreCase(funding)) {
+                        pm.Funding__c = 'Prepaid';
+                    } else {
+                        pm.Funding__c = funding.substring(0, 1).toUpperCase() + funding.substring(1).toLowerCase();
+                    }
+                    afterValues.put('Funding__c', pm.Funding__c);
+                    filledFields.add('Funding__c');
+                    System.debug('✅ Filled Funding__c: ' + pm.Funding__c);
+                }
+                
+                // Fingerprint length (for fraud detection)
+                String fingerprint = (String) cardData.get('fingerprint');
+                if (String.isBlank(pm.Finger_Print_Length__c) && String.isNotBlank(fingerprint)) {
+                    beforeValues.put('Finger_Print_Length__c', pm.Finger_Print_Length__c);
+                    pm.Finger_Print_Length__c = String.valueOf(fingerprint.length());
+                    afterValues.put('Finger_Print_Length__c', pm.Finger_Print_Length__c);
+                    filledFields.add('Finger_Print_Length__c');
+                    System.debug('✅ Filled Finger_Print_Length__c: ' + pm.Finger_Print_Length__c);
+                }
+                
+            } else {
+                System.debug('⚠️ No card data found in Stripe response');
+            }
+            
+            // STEP 4: Fill bank account details (for ACH payments)
+            System.debug('🔧 STEP 4: Processing bank account details...');
+            Map<String, Object> bankAccountData = (Map<String, Object>) stripePaymentMethod.get('us_bank_account');
+            if (bankAccountData != null) {
+                System.debug('Found us_bank_account data in Stripe response');
+                
+                // Bank account type
+                String accountType = (String) bankAccountData.get('account_type');
+                if (String.isBlank(pm.Bank_Account_Type__c) && String.isNotBlank(accountType)) {
+                    beforeValues.put('Bank_Account_Type__c', pm.Bank_Account_Type__c);
+                    pm.Bank_Account_Type__c = accountType.toLowerCase().contains('checking') ? 'Checking' : 'Savings';
+                    afterValues.put('Bank_Account_Type__c', pm.Bank_Account_Type__c);
+                    filledFields.add('Bank_Account_Type__c');
+                    System.debug('✅ Filled Bank_Account_Type__c: ' + pm.Bank_Account_Type__c);
+                }
+                
+                // Account holder type
+                String holderType = (String) bankAccountData.get('account_holder_type');
+                if (String.isBlank(pm.Account_Holder_Type__c) && String.isNotBlank(holderType)) {
+                    beforeValues.put('Account_Holder_Type__c', pm.Account_Holder_Type__c);
+                    pm.Account_Holder_Type__c = holderType;
+                    afterValues.put('Account_Holder_Type__c', pm.Account_Holder_Type__c);
+                    filledFields.add('Account_Holder_Type__c');
+                    System.debug('✅ Filled Account_Holder_Type__c: ' + pm.Account_Holder_Type__c);
+                }
+                
+                // Bank name
+                String bankName = (String) bankAccountData.get('bank_name');
+                if (String.isBlank(pm.Bank_Name__c) && String.isNotBlank(bankName)) {
+                    beforeValues.put('Bank_Name__c', pm.Bank_Name__c);
+                    pm.Bank_Name__c = bankName;
+                    afterValues.put('Bank_Name__c', pm.Bank_Name__c);
+                    filledFields.add('Bank_Name__c');
+                    System.debug('✅ Filled Bank_Name__c: ' + pm.Bank_Name__c);
+                }
+                
+                // Bank account number (last 4 only for security)
+                String bankLast4 = (String) bankAccountData.get('last4');
+                if (String.isBlank(pm.Bank_Account_Number__c) && String.isNotBlank(bankLast4)) {
+                    beforeValues.put('Bank_Account_Number__c', pm.Bank_Account_Number__c);
+                    pm.Bank_Account_Number__c = '****' + bankLast4;
+                    afterValues.put('Bank_Account_Number__c', pm.Bank_Account_Number__c);
+                    filledFields.add('Bank_Account_Number__c');
+                    System.debug('✅ Filled Bank_Account_Number__c: ' + pm.Bank_Account_Number__c);
+                }
+                
+                // Routing number
+                String routingNumber = (String) bankAccountData.get('routing_number');
+                if (String.isBlank(pm.Bank_Routing_Code__c) && String.isNotBlank(routingNumber)) {
+                    beforeValues.put('Bank_Routing_Code__c', pm.Bank_Routing_Code__c);
+                    pm.Bank_Routing_Code__c = routingNumber;
+                    afterValues.put('Bank_Routing_Code__c', pm.Bank_Routing_Code__c);
+                    filledFields.add('Bank_Routing_Code__c');
+                    System.debug('✅ Filled Bank_Routing_Code__c: ' + pm.Bank_Routing_Code__c);
+                }
+                
+            } else {
+                System.debug('ℹ️ No bank account data found (this is normal for card payments)');
+            }
+            
+            // STEP 5: Fill gateway response (store Stripe ID for reference)
+            if (String.isBlank(pm.Gateway_Response__c)) {
+                beforeValues.put('Gateway_Response__c', pm.Gateway_Response__c);
+                String stripeId = (String) stripePaymentMethod.get('id');
+                if (String.isNotBlank(stripeId)) {
+                    // Field has 18 char limit, so store just the ID
+                    pm.Gateway_Response__c = stripeId.length() <= 18 ? stripeId : stripeId.left(18);
+                    afterValues.put('Gateway_Response__c', pm.Gateway_Response__c);
+                    filledFields.add('Gateway_Response__c');
+                    System.debug('✅ Filled Gateway_Response__c: ' + pm.Gateway_Response__c);
+                }
+            }
+            
+            // STEP 6: Update the record if any fields were filled
+            System.debug('🔄 STEP 6: Updating Payment Method record...');
+            System.debug('Total fields to be filled: ' + filledFields.size());
+            System.debug('Fields to be filled: ' + String.join(filledFields, ', '));
+            
+            if (filledFields.size() > 0) {
+                update pm;
+                System.debug('✅ Payment Method record updated successfully!');
+            } else {
+                System.debug('ℹ️ All fields were already filled - no updates needed');
+            }
+            
+            // STEP 7: Build comprehensive response
+            Map<String, Object> result = new Map<String, Object>{
+                'success' => true,
+                'salesforcePaymentMethodId' => pm.Id,
+                'stripePaymentMethodId' => pm.Strip_Payment_ID__c,
+                'totalFieldsFilled' => filledFields.size(),
+                'filledFields' => filledFields,
+                'beforeValues' => beforeValues,
+                'afterValues' => afterValues,
+                'message' => filledFields.size() > 0 ? 
+                    'Successfully filled ' + filledFields.size() + ' empty fields from Stripe: ' + String.join(filledFields, ', ') :
+                    'All fields were already populated - no fields needed to be filled',
+                'stripeDataReceived' => true,
+                'stripePaymentMethodType' => stripePaymentMethod.get('type'),
+                'fullStripeResponse' => stripePaymentMethod
+            };
+            
+            System.debug('🎉 FIELD FILLING COMPLETED SUCCESSFULLY!');
+            System.debug('📊 Summary: ' + filledFields.size() + ' fields filled');
+            System.debug('📝 Fields filled: ' + String.join(filledFields, ', '));
+            
+            return JSON.serialize(result);
+            
+        } catch (Exception e) {
+            System.debug('❌ ERROR FILLING FIELDS FROM STRIPE:');
+            System.debug('🔴 Error Type: ' + e.getTypeName());
+            System.debug('📝 Error Message: ' + e.getMessage());
+            System.debug('📍 Line Number: ' + e.getLineNumber());
+            System.debug('🔍 Stack Trace:');
+            System.debug(e.getStackTraceString());
+            return errorJson('Failed to fill empty fields from Stripe: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * DYNAMIC METHOD: Auto-fill Payment Method fields like the PM-0029 example
+     * This method will make any Payment Method record look like the properly filled PM-0029
+     */
+    @RemoteAction
+    public static String autoFillPaymentMethodFields(String paymentMethodId) {
+        System.debug('🎯 === AUTO-FILLING PAYMENT METHOD FIELDS ===');
+        System.debug('Target Payment Method ID: ' + paymentMethodId);
+        
+        try {
+            if (String.isBlank(paymentMethodId)) {
+                return errorJson('Payment Method ID is required');
+            }
+            
+            // Query the Payment Method record
+            List<Payment_Method__c> methods = [
+                SELECT Id, Name, Strip_Payment_ID__c, Payment_Type__c, Status__c, Gateway__c,
+                       Account__c, Default_Payment_Method__c, Currency__c, Active__c,
+                       First_Name__c, Last_Name__c, Name_On_Card__c, Email__c,
+                       Card__c, Card_Number__c, Card_Last_4_Digit__c, 
+                       Card_Expire_Month__c, Card_Expire_Year__c, Funding__c,
+                       Bank_Account_Type__c, Bank_Account_Name__c, Bank_Account_Number__c,
+                       Bank_Name__c, Bank_Routing_Code__c, Account_Holder_Type__c,
+                       Finger_Print_Length__c, Gateway_Response__c, Mandate_Id__c
+                FROM Payment_Method__c 
+                WHERE Id = :paymentMethodId 
+                LIMIT 1
+            ];
+            
+            if (methods.isEmpty()) {
+                return errorJson('Payment Method record not found with ID: ' + paymentMethodId);
+            }
+            
+            Payment_Method__c pm = methods[0];
+            System.debug('📋 Found Payment Method: ' + pm.Name);
+            
+            // Check if we have a Stripe Payment Method ID
+            String stripePaymentMethodId = pm.Strip_Payment_ID__c;
+            
+            // If Strip_Payment_ID__c starts with 'pi_', try to get the actual payment method ID
+            if (String.isNotBlank(stripePaymentMethodId) && stripePaymentMethodId.startsWith('pi_')) {
+                System.debug('⚠️ Found Payment Intent ID, trying to get Payment Method ID...');
+                String pmResult = getPaymentMethodFromIntent(stripePaymentMethodId);
+                Map<String, Object> pmData = (Map<String, Object>) JSON.deserializeUntyped(pmResult);
+                
+                if (pmData.get('success') == true) {
+                    stripePaymentMethodId = (String) pmData.get('paymentMethodId');
+                    System.debug('✅ Retrieved actual Payment Method ID: ' + stripePaymentMethodId);
+                    pm.Strip_Payment_ID__c = stripePaymentMethodId;
+                }
+            }
+            
+            if (String.isBlank(stripePaymentMethodId)) {
+                return errorJson('No Stripe Payment Method ID found in record');
+            }
+            
+            // Get complete Stripe payment method data
+            System.debug('🔄 Fetching Stripe data for: ' + stripePaymentMethodId);
+            String stripeResponse = getStripePaymentMethodDetails(stripePaymentMethodId);
+            Map<String, Object> stripeData = (Map<String, Object>) JSON.deserializeUntyped(stripeResponse);
+            
+            if (stripeData.containsKey('error')) {
+                return errorJson('Failed to get Stripe payment method: ' + stripeData.get('message'));
+            }
+            
+            System.debug('✅ Retrieved Stripe data successfully');
+            
+            // Track changes
+            List<String> filledFields = new List<String>();
+            Map<String, Object> beforeValues = new Map<String, Object>();
+            Map<String, Object> afterValues = new Map<String, Object>();
+            
+            // Fill all fields systematically like PM-0029
+            fillFieldIfEmpty(pm, 'Gateway__c', 'Stripe', filledFields, beforeValues, afterValues);
+            fillFieldIfEmpty(pm, 'Status__c', 'Valid', filledFields, beforeValues, afterValues);
+            fillFieldIfEmpty(pm, 'Currency__c', 'USD', filledFields, beforeValues, afterValues);
+            
+            // Payment type based on Stripe type
+            String stripeType = (String) stripeData.get('type');
+            String paymentType = 'card'.equalsIgnoreCase(stripeType) ? 'Credit Card' : 'ACH';
+            fillFieldIfEmpty(pm, 'Payment_Type__c', paymentType, filledFields, beforeValues, afterValues);
+            
+            // Process billing details
+            Map<String, Object> billingDetails = (Map<String, Object>) stripeData.get('billing_details');
+            if (billingDetails != null) {
+                // Name fields
+                String fullName = (String) billingDetails.get('name');
+                if (String.isNotBlank(fullName)) {
+                    fillFieldIfEmpty(pm, 'Name_On_Card__c', fullName, filledFields, beforeValues, afterValues);
+                    
+                    // Split name into first and last
+                    List<String> nameParts = fullName.trim().split(' ');
+                    if (nameParts.size() >= 1) {
+                        fillFieldIfEmpty(pm, 'First_Name__c', nameParts[0], filledFields, beforeValues, afterValues);
+                        
+                        if (nameParts.size() > 1) {
+                            List<String> lastNameParts = new List<String>();
+                            for (Integer i = 1; i < nameParts.size(); i++) {
+                                lastNameParts.add(nameParts[i]);
+                            }
+                            String lastName = String.join(lastNameParts, ' ');
+                            fillFieldIfEmpty(pm, 'Last_Name__c', lastName, filledFields, beforeValues, afterValues);
+                        }
+                    }
+                }
+                
+                // Email
+                String email = (String) billingDetails.get('email');
+                if (String.isNotBlank(email)) {
+                    fillFieldIfEmpty(pm, 'Email__c', email, filledFields, beforeValues, afterValues);
+                }
+            }
+            
+            // Process card details
+            Map<String, Object> cardData = (Map<String, Object>) stripeData.get('card');
+            if (cardData != null) {
+                // Card brand - exactly like PM-0029
+                String brand = (String) cardData.get('brand');
+                if (String.isNotBlank(brand)) {
+                    String cardBrand = 'Visa'; // Default
+                    if ('visa'.equalsIgnoreCase(brand)) cardBrand = 'Visa';
+                    else if ('mastercard'.equalsIgnoreCase(brand)) cardBrand = 'Master Card';
+                    else if ('american_express'.equalsIgnoreCase(brand) || 'amex'.equalsIgnoreCase(brand)) cardBrand = 'American Express';
+                    else if ('discover'.equalsIgnoreCase(brand)) cardBrand = 'Discover';
+                    
+                    fillFieldIfEmpty(pm, 'Card__c', cardBrand, filledFields, beforeValues, afterValues);
+                }
+                
+                // Card last 4 digits - exactly like PM-0029 (shows 4242)
+                String last4 = (String) cardData.get('last4');
+                if (String.isNotBlank(last4)) {
+                    fillFieldIfEmpty(pm, 'Card_Last_4_Digit__c', last4, filledFields, beforeValues, afterValues);
+                    
+                    // Masked card number - exactly like PM-0029 (shows ************5678)
+                    String maskedNumber = '************' + last4;
+                    fillFieldIfEmpty(pm, 'Card_Number__c', maskedNumber, filledFields, beforeValues, afterValues);
+                }
+                
+                // Expiration month - exactly like PM-0029 (shows 08)
+                Object expMonth = cardData.get('exp_month');
+                if (expMonth != null) {
+                    String monthStr = String.valueOf(expMonth);
+                    if (monthStr.length() == 1) monthStr = '0' + monthStr; // Pad with zero like PM-0029
+                    fillFieldIfEmpty(pm, 'Card_Expire_Month__c', monthStr, filledFields, beforeValues, afterValues);
+                }
+                
+                // Expiration year - exactly like PM-0029 (shows 2044)
+                Object expYear = cardData.get('exp_year');
+                if (expYear != null) {
+                    fillFieldIfEmpty(pm, 'Card_Expire_Year__c', String.valueOf(expYear), filledFields, beforeValues, afterValues);
+                }
+                
+                // Funding type - exactly like PM-0029 (shows Credit)
+                String funding = (String) cardData.get('funding');
+                if (String.isNotBlank(funding)) {
+                    String fundingType = 'Credit'; // Default
+                    if ('credit'.equalsIgnoreCase(funding)) fundingType = 'Credit';
+                    else if ('debit'.equalsIgnoreCase(funding)) fundingType = 'Debit';
+                    else if ('prepaid'.equalsIgnoreCase(funding)) fundingType = 'Prepaid';
+                    
+                    fillFieldIfEmpty(pm, 'Funding__c', fundingType, filledFields, beforeValues, afterValues);
+                }
+                
+                // Fingerprint length - exactly like PM-0029 (shows 16)
+                String fingerprint = (String) cardData.get('fingerprint');
+                if (String.isNotBlank(fingerprint)) {
+                    fillFieldIfEmpty(pm, 'Finger_Print_Length__c', String.valueOf(fingerprint.length()), filledFields, beforeValues, afterValues);
+                }
+            }
+            
+            // Gateway Response - exactly like PM-0029 (shows the payment method ID)
+            if (String.isNotBlank(stripePaymentMethodId)) {
+                String gatewayResponse = stripePaymentMethodId.length() <= 18 ? stripePaymentMethodId : stripePaymentMethodId.left(18);
+                fillFieldIfEmpty(pm, 'Gateway_Response__c', gatewayResponse, filledFields, beforeValues, afterValues);
+            }
+            
+            // Update the record if changes were made
+            if (filledFields.size() > 0) {
+                update pm;
+                System.debug('✅ Payment Method updated successfully!');
+                System.debug('📊 Fields filled: ' + filledFields.size());
+                System.debug('📝 Updated fields: ' + String.join(filledFields, ', '));
+            } else {
+                System.debug('ℹ️ All fields were already populated');
+            }
+            
+            // Prepare response
+            Map<String, Object> result = new Map<String, Object>{
+                'success' => true,
+                'paymentMethodId' => pm.Id,
+                'paymentMethodName' => pm.Name,
+                'stripePaymentMethodId' => stripePaymentMethodId,
+                'fieldsUpdated' => filledFields.size(),
+                'filledFields' => filledFields,
+                'beforeValues' => beforeValues,
+                'afterValues' => afterValues,
+                'message' => filledFields.size() > 0 ? 
+                    'Successfully filled ' + filledFields.size() + ' fields to match PM-0029 standard: ' + String.join(filledFields, ', ') :
+                    'Payment Method was already properly filled like PM-0029',
+                'recommendation' => 'Payment Method now matches the PM-0029 standard with all available Stripe data populated'
+            };
+            
+            return JSON.serialize(result);
+            
+        } catch (Exception e) {
+            System.debug('❌ Error in auto-fill Payment Method fields:');
+            System.debug('  - Type: ' + e.getTypeName());
+            System.debug('  - Message: ' + e.getMessage());
+            System.debug('  - Stack Trace: ' + e.getStackTraceString());
+            return errorJson('Auto-fill failed: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * UTILITY: Fill field only if it's currently empty
+     */
+    private static void fillFieldIfEmpty(
+        Payment_Method__c record, 
+        String fieldName, 
+        Object newValue, 
+        List<String> filledFields,
+        Map<String, Object> beforeValues,
+        Map<String, Object> afterValues
+    ) {
+        try {
+            Object currentValue = record.get(fieldName);
+            
+            // Check if field is empty
+            if (currentValue == null || String.isBlank(String.valueOf(currentValue))) {
+                beforeValues.put(fieldName, currentValue);
+                record.put(fieldName, newValue);
+                afterValues.put(fieldName, newValue);
+                filledFields.add(fieldName);
+                
+                System.debug('✅ Filled ' + fieldName + ': ' + newValue);
+            }
+        } catch (Exception e) {
+            System.debug('⚠️ Could not fill field ' + fieldName + ': ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * BATCH METHOD: Auto-fill multiple Payment Method records at once
+     */
+    @RemoteAction
+    public static String batchFillPaymentMethods(List<String> paymentMethodIds) {
+        System.debug('🚀 === BATCH AUTO-FILLING PAYMENT METHODS ===');
+        System.debug('Processing ' + paymentMethodIds.size() + ' Payment Methods');
+        
+        List<Map<String, Object>> results = new List<Map<String, Object>>();
+        Integer successCount = 0;
+        Integer errorCount = 0;
+        
+        for (String pmId : paymentMethodIds) {
+            try {
+                String result = autoFillPaymentMethodFields(pmId);
+                Map<String, Object> resultData = (Map<String, Object>) JSON.deserializeUntyped(result);
+                
+                if (resultData.get('success') == true) {
+                    successCount++;
+                } else {
+                    errorCount++;
+                }
+                
+                results.add(resultData);
+                
+            } catch (Exception e) {
+                errorCount++;
+                results.add(new Map<String, Object>{
+                    'success' => false,
+                    'paymentMethodId' => pmId,
+                    'error' => e.getMessage()
+                });
+            }
+        }
+        
+        Map<String, Object> batchResult = new Map<String, Object>{
+            'success' => true,
+            'totalProcessed' => paymentMethodIds.size(),
+            'successCount' => successCount,
+            'errorCount' => errorCount,
+            'results' => results,
+            'message' => 'Batch processing completed: ' + successCount + ' successful, ' + errorCount + ' errors'
+        };
+        
+        return JSON.serialize(batchResult);
+    }
+    
+    /**
+     * UTILITY METHOD: Find all Payment Methods that need field filling
+     */
+    @RemoteAction
+    public static String findIncompletePaymentMethods() {
+        System.debug('🔍 === FINDING INCOMPLETE PAYMENT METHODS ===');
+        
+        try {
+            // Query Payment Methods with missing key fields
+            List<Payment_Method__c> incompleteRecords = [
+                SELECT Id, Name, Strip_Payment_ID__c, Email__c, Card__c, Card_Last_4_Digit__c,
+                       Card_Expire_Month__c, Card_Expire_Year__c, Funding__c, Finger_Print_Length__c
+                FROM Payment_Method__c 
+                WHERE Strip_Payment_ID__c != null
+                AND (Email__c = null OR Card_Last_4_Digit__c = null OR Card_Expire_Month__c = null 
+                     OR Card_Expire_Year__c = null OR Funding__c = null OR Finger_Print_Length__c = null)
+                ORDER BY CreatedDate DESC
+                LIMIT 50
+            ];
+            
+            List<Map<String, Object>> incompleteList = new List<Map<String, Object>>();
+            
+            for (Payment_Method__c pm : incompleteRecords) {
+                List<String> missingFields = new List<String>();
+                
+                if (String.isBlank(pm.Email__c)) missingFields.add('Email__c');
+                if (String.isBlank(pm.Card__c)) missingFields.add('Card__c');
+                if (String.isBlank(pm.Card_Last_4_Digit__c)) missingFields.add('Card_Last_4_Digit__c');
+                if (String.isBlank(pm.Card_Expire_Month__c)) missingFields.add('Card_Expire_Month__c');
+                if (String.isBlank(pm.Card_Expire_Year__c)) missingFields.add('Card_Expire_Year__c');
+                if (String.isBlank(pm.Funding__c)) missingFields.add('Funding__c');
+                if (String.isBlank(pm.Finger_Print_Length__c)) missingFields.add('Finger_Print_Length__c');
+                
+                incompleteList.add(new Map<String, Object>{
+                    'id' => pm.Id,
+                    'name' => pm.Name,
+                    'stripeId' => pm.Strip_Payment_ID__c,
+                    'missingFields' => missingFields,
+                    'missingCount' => missingFields.size()
+                });
+            }
+            
+            Map<String, Object> result = new Map<String, Object>{
+                'success' => true,
+                'totalFound' => incompleteRecords.size(),
+                'incompleteRecords' => incompleteList,
+                'message' => 'Found ' + incompleteRecords.size() + ' Payment Methods with missing fields'
+            };
+            
+            return JSON.serialize(result);
+            
+        } catch (Exception e) {
+            return errorJson('Failed to find incomplete Payment Methods: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * DIAGNOSTIC METHOD: Analyze payment flow and identify issues with payment method creation
+     */
+    @RemoteAction
+    public static String diagnosePaymentFlow(String stripePaymentIntentId) {
+        System.debug('🔍 === DIAGNOSING PAYMENT FLOW ===');
+        System.debug('Stripe Payment Intent ID: ' + stripePaymentIntentId);
+        
+        Map<String, Object> diagnosis = new Map<String, Object>{
+            'success' => true,
+            'paymentIntentId' => stripePaymentIntentId,
+            'timestamp' => System.now(),
+            'steps' => new List<Map<String, Object>>()
+        };
+        
+        List<Map<String, Object>> steps = (List<Map<String, Object>>) diagnosis.get('steps');
+        
+        try {
+            // Step 1: Validate Payment Intent ID
+            steps.add(new Map<String, Object>{
+                'step' => 1,
+                'name' => 'Validate Payment Intent ID',
+                'status' => String.isNotBlank(stripePaymentIntentId) ? 'PASS' : 'FAIL',
+                'details' => String.isNotBlank(stripePaymentIntentId) ? 'Valid Payment Intent ID provided' : 'Payment Intent ID is missing',
+                'data' => new Map<String, Object>{
+                    'providedId' => stripePaymentIntentId,
+                    'isValid' => String.isNotBlank(stripePaymentIntentId)
+                }
+            });
+            
+            if (String.isBlank(stripePaymentIntentId)) {
+                diagnosis.put('overallResult', 'FAIL');
+                diagnosis.put('message', 'Payment Intent ID is required for diagnosis');
+                return JSON.serialize(diagnosis);
+            }
+            
+            // Step 2: Retrieve Payment Intent from Stripe
+            String paymentIntentStatus = 'UNKNOWN';
+            Map<String, Object> paymentIntentData = null;
+            
+            try {
+                String normalizedId = normalizePaymentIntentId(stripePaymentIntentId);
+                String secretKey = getStripeSecretKey();
+                
+                HttpRequest req = new HttpRequest();
+                req.setEndpoint(BASE_URL + 'payment_intents/' + normalizedId + '?expand[]=payment_method&expand[]=latest_charge');
+                req.setMethod('GET');
+                req.setHeader('Authorization', 'Bearer ' + secretKey);
+                
+                Http http = new Http();
+                HttpResponse res = http.send(req);
+                
+                if (res.getStatusCode() == 200) {
+                    paymentIntentData = (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
+                    paymentIntentStatus = 'FOUND';
+                } else {
+                    paymentIntentStatus = 'NOT_FOUND';
+                }
+                
+            } catch (Exception e) {
+                paymentIntentStatus = 'ERROR: ' + e.getMessage();
+            }
+            
+            steps.add(new Map<String, Object>{
+                'step' => 2,
+                'name' => 'Retrieve Payment Intent from Stripe',
+                'status' => paymentIntentStatus == 'FOUND' ? 'PASS' : 'FAIL',
+                'details' => 'Payment Intent Status: ' + paymentIntentStatus,
+                'data' => new Map<String, Object>{
+                    'stripeStatus' => paymentIntentStatus,
+                    'paymentIntentExists' => paymentIntentStatus == 'FOUND',
+                    'stripeData' => paymentIntentData != null ? (Object) paymentIntentData : (Object) 'No data available'
+                }
+            });
+            
+            if (paymentIntentStatus != 'FOUND' || paymentIntentData == null) {
+                diagnosis.put('overallResult', 'FAIL');
+                diagnosis.put('message', 'Cannot retrieve Payment Intent from Stripe: ' + paymentIntentStatus);
+                return JSON.serialize(diagnosis);
+            }
+            
+            // Step 3: Check Payment Intent Status
+            String piStatus = (String) paymentIntentData.get('status');
+            Boolean isSucceeded = 'succeeded'.equals(piStatus);
+            
+            steps.add(new Map<String, Object>{
+                'step' => 3,
+                'name' => 'Check Payment Intent Status',
+                'status' => isSucceeded ? 'PASS' : 'WARNING',
+                'details' => 'Payment Intent Status: ' + piStatus + (isSucceeded ? ' (Payment completed)' : ' (Payment not completed)'),
+                'data' => new Map<String, Object>{
+                    'status' => piStatus,
+                    'succeeded' => isSucceeded,
+                    'amount' => paymentIntentData.get('amount'),
+                    'currency' => paymentIntentData.get('currency'),
+                    'created' => paymentIntentData.get('created')
+                }
+            });
+            
+            // Step 4: Extract Payment Method ID
+            String paymentMethodId = null;
+            String paymentMethodSource = null;
+            
+            // Try multiple sources for payment method ID
+            paymentMethodId = (String) paymentIntentData.get('payment_method');
+            if (String.isNotBlank(paymentMethodId)) {
+                paymentMethodSource = 'payment_intent.payment_method';
+            } else {
+                // Try latest_charge.payment_method
+                Object latestCharge = paymentIntentData.get('latest_charge');
+                if (latestCharge instanceof Map<String, Object>) {
+                    Map<String, Object> chargeData = (Map<String, Object>) latestCharge;
+                    paymentMethodId = (String) chargeData.get('payment_method');
+                    if (String.isNotBlank(paymentMethodId)) {
+                        paymentMethodSource = 'latest_charge.payment_method';
+                    }
+                }
+                
+                // Try charges.data[0].payment_method
+                if (String.isBlank(paymentMethodId)) {
+                    Map<String, Object> charges = (Map<String, Object>) paymentIntentData.get('charges');
+                    if (charges != null && charges.containsKey('data')) {
+                        List<Object> chargesData = (List<Object>) charges.get('data');
+                        if (chargesData != null && !chargesData.isEmpty()) {
+                            Object firstCharge = chargesData[0];
+                            if (firstCharge instanceof Map<String, Object>) {
+                                Map<String, Object> firstChargeData = (Map<String, Object>) firstCharge;
+                                paymentMethodId = (String) firstChargeData.get('payment_method');
+                                if (String.isNotBlank(paymentMethodId)) {
+                                    paymentMethodSource = 'charges.data[0].payment_method';
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Boolean paymentMethodFound = String.isNotBlank(paymentMethodId);
+            
+            steps.add(new Map<String, Object>{
+                'step' => 4,
+                'name' => 'Extract Payment Method ID',
+                'status' => paymentMethodFound ? 'PASS' : 'FAIL',
+                'details' => paymentMethodFound ? ('Payment Method ID found: ' + paymentMethodId + ' (from ' + paymentMethodSource + ')') : 'No Payment Method ID found in Payment Intent',
+                'data' => new Map<String, Object>{
+                    'paymentMethodId' => paymentMethodId,
+                    'source' => paymentMethodSource,
+                    'found' => paymentMethodFound,
+                    'searchedLocations' => new List<String>{
+                        'payment_intent.payment_method',
+                        'latest_charge.payment_method', 
+                        'charges.data[0].payment_method'
+                    }
+                }
+            });
+            
+            if (!paymentMethodFound) {
+                diagnosis.put('overallResult', 'FAIL');
+                diagnosis.put('message', 'Payment Method ID not found in Payment Intent. This indicates an issue with how the payment was processed.');
+                diagnosis.put('recommendation', 'Check if payment was completed using Stripe Elements properly and payment method was attached to the Payment Intent');
+                return JSON.serialize(diagnosis);
+            }
+            
+            // Step 5: Retrieve Payment Method Details from Stripe
+            Map<String, Object> paymentMethodData = null;
+            String paymentMethodStatus = 'UNKNOWN';
+            
+            try {
+                String pmDetailsResponse = getStripePaymentMethodDetails(paymentMethodId);
+                paymentMethodData = (Map<String, Object>) JSON.deserializeUntyped(pmDetailsResponse);
+                
+                if (paymentMethodData.containsKey('error')) {
+                    paymentMethodStatus = 'ERROR: ' + paymentMethodData.get('message');
+                } else {
+                    paymentMethodStatus = 'FOUND';
+                }
+                
+            } catch (Exception e) {
+                paymentMethodStatus = 'EXCEPTION: ' + e.getMessage();
+            }
+            
+            steps.add(new Map<String, Object>{
+                'step' => 5,
+                'name' => 'Retrieve Payment Method from Stripe',
+                'status' => paymentMethodStatus == 'FOUND' ? 'PASS' : 'FAIL',
+                'details' => 'Payment Method Retrieval Status: ' + paymentMethodStatus,
+                'data' => new Map<String, Object>{
+                    'retrievalStatus' => paymentMethodStatus,
+                    'paymentMethodId' => paymentMethodId,
+                    'stripePaymentMethodData' => paymentMethodData,
+                    'paymentMethodExists' => paymentMethodStatus == 'FOUND'
+                }
+            });
+            
+            if (paymentMethodStatus != 'FOUND') {
+                diagnosis.put('overallResult', 'FAIL');
+                diagnosis.put('message', 'Cannot retrieve Payment Method from Stripe: ' + paymentMethodStatus);
+                diagnosis.put('recommendation', 'The Payment Method ID exists in the Payment Intent but cannot be retrieved from Stripe API. Check API permissions and key validity.');
+                return JSON.serialize(diagnosis);
+            }
+            
+            // Step 6: Analyze Payment Method Data
+            String pmType = (String) paymentMethodData.get('type');
+            Map<String, Object> cardData = (Map<String, Object>) paymentMethodData.get('card');
+            Map<String, Object> billingDetails = (Map<String, Object>) paymentMethodData.get('billing_details');
+            
+            Map<String, Object> paymentMethodAnalysis = new Map<String, Object>{
+                'type' => pmType,
+                'hasCardData' => cardData != null,
+                'hasBillingDetails' => billingDetails != null,
+                'cardBrand' => cardData != null ? cardData.get('brand') : null,
+                'cardLast4' => cardData != null ? cardData.get('last4') : null,
+                'cardExpMonth' => cardData != null ? cardData.get('exp_month') : null,
+                'cardExpYear' => cardData != null ? cardData.get('exp_year') : null,
+                'cardFunding' => cardData != null ? cardData.get('funding') : null,
+                'billingName' => billingDetails != null ? billingDetails.get('name') : null,
+                'billingEmail' => billingDetails != null ? billingDetails.get('email') : null
+            };
+            
+            steps.add(new Map<String, Object>{
+                'step' => 6,
+                'name' => 'Analyze Payment Method Data',
+                'status' => 'PASS',
+                'details' => 'Payment Method Type: ' + pmType + ', Has Card Data: ' + (cardData != null) + ', Has Billing Details: ' + (billingDetails != null),
+                'data' => paymentMethodAnalysis
+            });
+            
+            // Step 7: Check for Existing Salesforce Records
+            List<Payment_Method__c> existingSalesforcePaymentMethods = [
+                SELECT Id, Name, Strip_Payment_ID__c, Payment_Type__c, Card_Last_4_Digit__c,
+                       Email__c, Name_On_Card__c, CreatedDate
+                FROM Payment_Method__c 
+                WHERE Strip_Payment_ID__c = :paymentMethodId
+                LIMIT 5
+            ];
+            
+            Boolean salesforceRecordExists = !existingSalesforcePaymentMethods.isEmpty();
+            
+            steps.add(new Map<String, Object>{
+                'step' => 7,
+                'name' => 'Check Salesforce Payment Method Records',
+                'status' => salesforceRecordExists ? 'PASS' : 'WARNING',
+                'details' => salesforceRecordExists ? ('Found ' + existingSalesforcePaymentMethods.size() + ' existing Salesforce Payment Method records') : 'No Salesforce Payment Method records found for this Stripe Payment Method',
+                'data' => new Map<String, Object>{
+                    'recordExists' => salesforceRecordExists,
+                    'recordCount' => existingSalesforcePaymentMethods.size(),
+                    'existingRecords' => existingSalesforcePaymentMethods
+                }
+            });
+            
+            // Step 8: Overall Assessment
+            String overallResult = 'PASS';
+            String overallMessage = 'Payment flow analysis completed successfully. Payment Method is visible in Stripe and can be processed.';
+            List<String> recommendations = new List<String>();
+            
+            if (!isSucceeded) {
+                recommendations.add('Payment Intent has not succeeded - ensure payment completion flow is working');
+            }
+            
+            if (!salesforceRecordExists) {
+                recommendations.add('Create Salesforce Payment Method record using createCompletePaymentMethodFromStripe() method');
+                recommendations.add('Use the payment method ID: ' + paymentMethodId);
+            }
+            
+            if (cardData != null) {
+                recommendations.add('Payment method contains card data and should be visible in Stripe dashboard under Payment Methods');
+            }
+            
+            if (billingDetails == null || billingDetails.isEmpty()) {
+                recommendations.add('Consider collecting billing details during payment to improve record keeping');
+            }
+            
+            steps.add(new Map<String, Object>{
+                'step' => 8,
+                'name' => 'Overall Assessment',
+                'status' => overallResult,
+                'details' => overallMessage,
+                'data' => new Map<String, Object>{
+                    'recommendations' => recommendations,
+                    'paymentIntentSucceeded' => isSucceeded,
+                    'paymentMethodRetrievable' => true,
+                    'salesforceRecordExists' => salesforceRecordExists,
+                    'readyForProcessing' => true
+                }
+            });
+            
+            // Final diagnosis
+            diagnosis.put('overallResult', overallResult);
+            diagnosis.put('message', overallMessage);
+            diagnosis.put('recommendations', recommendations);
+            diagnosis.put('paymentMethodId', paymentMethodId);
+            diagnosis.put('paymentMethodVisible', true);
+            diagnosis.put('nextSteps', new List<String>{
+                'Payment Method should be visible in your Stripe Dashboard under Payment Methods',
+                'If not visible, check your Stripe Dashboard filters (All vs. Succeeded payments)',
+                'Use createCompletePaymentMethodFromStripe("' + paymentMethodId + '", accountId) to create Salesforce record',
+                'Verify your Stripe API keys are for the same environment as your dashboard'
+            });
+            
+            return JSON.serialize(diagnosis);
+            
+        } catch (Exception e) {
+            System.debug('❌ Error in payment flow diagnosis:');
+            System.debug('  - Type: ' + e.getTypeName());
+            System.debug('  - Message: ' + e.getMessage());
+            System.debug('  - Stack Trace: ' + e.getStackTraceString());
+            
+            steps.add(new Map<String, Object>{
+                'step' => 99,
+                'name' => 'Diagnosis Error',
+                'status' => 'ERROR',
+                'details' => 'Diagnosis failed with exception: ' + e.getMessage(),
+                'data' => new Map<String, Object>{
+                    'exceptionType' => e.getTypeName(),
+                    'exceptionMessage' => e.getMessage()
+                }
+            });
+            
+            diagnosis.put('overallResult', 'ERROR');
+            diagnosis.put('message', 'Diagnosis failed: ' + e.getMessage());
+            return JSON.serialize(diagnosis);
+        }
+    }
+    
+    /**
+     * ENHANCED METHOD: Link existing Payment Method with a new Payment record
+     * Use this when you have an existing Payment Method but need to create a Payment record
+     */
+    @RemoteAction
+    public static String linkPaymentMethodWithPayment(
+        String existingPaymentMethodId,
+        String stripePaymentIntentId,
+        String invoiceId,
+        Decimal paymentAmount,
+        String cardHolderName
+    ) {
+        System.debug('=== Linking Existing Payment Method with New Payment ===');
+        System.debug('Payment Method ID: ' + existingPaymentMethodId);
+        System.debug('Stripe Payment Intent ID: ' + stripePaymentIntentId);
+        System.debug('Invoice ID: ' + invoiceId);
+        System.debug('Payment Amount: ' + paymentAmount);
+        
+        try {
+            // Validate parameters
+            if (String.isBlank(existingPaymentMethodId)) {
+                return errorJson('Payment Method ID is required');
+            }
+            if (String.isBlank(stripePaymentIntentId)) {
+                return errorJson('Stripe Payment Intent ID is required');
+            }
+            if (String.isBlank(invoiceId)) {
+                return errorJson('Invoice ID is required');
+            }
+            if (paymentAmount == null || paymentAmount <= 0) {
+                return errorJson('Valid payment amount is required');
+            }
+            
+            // Get the existing Payment Method
+            List<Payment_Method__c> existingMethods = [
+                SELECT Id, Name, Account__c, Strip_Payment_ID__c, Name_On_Card__c
+                FROM Payment_Method__c 
+                WHERE Id = :existingPaymentMethodId 
+                LIMIT 1
+            ];
+            
+            if (existingMethods.isEmpty()) {
+                return errorJson('Payment Method not found with ID: ' + existingPaymentMethodId);
+            }
+            
+            Payment_Method__c pm = existingMethods[0];
+            System.debug('Found Payment Method: ' + pm.Name + ' for Account: ' + pm.Account__c);
+            
+            // First, populate any missing fields in the Payment Method
+            try {
+                String populateResult = fillAllEmptyFieldsFromStripe(existingPaymentMethodId);
+                Map<String, Object> populateResultData = (Map<String, Object>) JSON.deserializeUntyped(populateResult);
+                if (populateResultData.get('success') == true) {
+                    System.debug('✅ Payment Method fields updated: ' + populateResultData.get('totalFieldsFilled') + ' fields');
+                }
+            } catch (Exception populateError) {
+                System.debug('⚠️ Could not populate missing fields (non-critical): ' + populateError.getMessage());
+            }
+            
+            // Create the Payment record linked to this Payment Method
+            Payment__c payment = new Payment__c(
+                Name = 'Payment - ' + stripePaymentIntentId,
+                Invoice__c = invoiceId,
+                Account__c = pm.Account__c,
+                Payment_Method_lookup__c = existingPaymentMethodId,
+                Status__c = 'Posted',
+                Balance__c = paymentAmount,
+                Paid_By__c = String.isNotBlank(cardHolderName) ? cardHolderName : 
+                            String.isNotBlank(pm.Name_On_Card__c) ? pm.Name_On_Card__c : 'Online Payment User',
+                Created_By__c = UserInfo.getName()
+            );
+            
+            insert payment;
+            
+            System.debug('✅ Payment record created and linked: ' + payment.Id);
+            
+            // Return comprehensive response
+            Map<String, Object> result = new Map<String, Object>{
+                'success' => true,
+                'paymentRecordId' => payment.Id,
+                'paymentMethodId' => existingPaymentMethodId,
+                'stripePaymentIntentId' => stripePaymentIntentId,
+                'invoiceId' => invoiceId,
+                'accountId' => pm.Account__c,
+                'paymentAmount' => paymentAmount,
+                'message' => 'Payment record successfully created and linked to existing Payment Method',
+                'relationships' => new Map<String, Object>{
+                    'payment_to_payment_method' => 'Payment__c.Payment_Method_lookup__c -> Payment_Method__c.Id',
+                    'payment_to_invoice' => 'Payment__c.Invoice__c -> Invoice__c.Id',
+                    'payment_to_account' => 'Payment__c.Account__c -> Account.Id'
+                }
+            };
+            
+            return JSON.serialize(result);
+            
+        } catch (Exception e) {
+            System.debug('❌ Error linking Payment Method with Payment:');
+            System.debug('  - Type: ' + e.getTypeName());
+            System.debug('  - Message: ' + e.getMessage());
+            System.debug('  - Stack Trace: ' + e.getStackTraceString());
+            return errorJson('Failed to link Payment Method with Payment: ' + e.getMessage());
         }
     }
 

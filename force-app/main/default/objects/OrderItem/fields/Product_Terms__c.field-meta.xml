@@ -10,9 +10,9 @@
         <valueSetDefinition>
             <sorted>false</sorted>
             <value>
-                <fullName>1</fullName>
+                <fullName>upfront</fullName>
                 <default>false</default>
-                <label>1</label>
+                <label>upfront</label>
             </value>
             <value>
                 <fullName>2</fullName>

@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
-    <fullName>Work_Order__c</fullName>
+    <fullName>Service_Territory__c</fullName>
     <deleteConstraint>SetNull</deleteConstraint>
-    <label>Work Order</label>
-    <referenceTo>WorkOrder</referenceTo>
-    <relationshipName>Fulfillment_Orders</relationshipName>
+    <label>Service Territory</label>
+    <referenceTo>ServiceTerritory</referenceTo>
+    <relationshipLabel>Appointment Slots</relationshipLabel>
+    <relationshipName>Appointment_Slots</relationshipName>
     <required>false</required>
     <trackTrending>false</trackTrending>
     <type>Lookup</type>

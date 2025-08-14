@@ -4,7 +4,7 @@
     <label>Card Number</label>
     <length>18</length>
     <maskChar>asterisk</maskChar>
-    <maskType>all</maskType>
+    <maskType>lastFour</maskType>
     <required>false</required>
     <trackHistory>false</trackHistory>
     <trackTrending>false</trackTrending>

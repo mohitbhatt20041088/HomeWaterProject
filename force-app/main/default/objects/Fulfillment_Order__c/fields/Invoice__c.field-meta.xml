@@ -4,7 +4,6 @@
     <deleteConstraint>SetNull</deleteConstraint>
     <label>Invoice</label>
     <referenceTo>Invoice__c</referenceTo>
-    <relationshipLabel>Fulfillment Orders</relationshipLabel>
     <relationshipName>Fulfillment_Orders</relationshipName>
     <required>false</required>
     <trackTrending>false</trackTrending>

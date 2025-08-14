@@ -660,12 +660,7 @@
                     const invoiceInfo = document.getElementById('invoice-info');
                     
                     amountInput.value = todaysInvoice.balance.toFixed(2);
-                    invoiceInfo.innerHTML = `
-                        <strong>📅 Today's Invoice Found!</strong><br>
-                        Invoice: ${todaysInvoice.name}<br>
-                        Due Amount: $${todaysInvoice.balance.toFixed(2)}<br>
-                        Invoice Date: ${new Date(todaysInvoice.invoiceDate).toLocaleDateString()}
-                    `;
+                    invoiceInfo.innerHTML = `${todaysInvoice.name}`;
                     invoiceInfo.style.color = '#28a745';
                     invoiceInfo.style.fontSize = '13px';
                     
@@ -713,12 +708,7 @@
                     const invoiceInfo = document.getElementById('invoice-info');
                     
                     amountInput.value = invoice.balance.toFixed(2);
-                    invoiceInfo.innerHTML = `
-                        <strong>⚠️ Original Invoice (Not Today's)</strong><br>
-                        Invoice: ${invoice.name}<br>
-                        Due Amount: $${invoice.balance.toFixed(2)}<br>
-                        Invoice Date: ${new Date(invoice.invoiceDate).toLocaleDateString()}
-                    `;
+                    invoiceInfo.innerHTML = `${invoice.name}`;
                     invoiceInfo.style.color = '#ffc107';
                     invoiceInfo.style.fontSize = '13px';
                     
@@ -818,18 +808,21 @@
                 document.querySelector('.tabs').style.display = 'flex';
                 document.getElementById('card-tab').style.display = 'block';
                 
-                // Reset the pay button
+                // Keep the pay button disabled since this invoice is already paid
                 const payNowButton = document.getElementById('pay-now-button');
-                payNowButton.disabled = false;
-                payNowButton.textContent = 'Pay Now';
+                payNowButton.disabled = true;
+                payNowButton.textContent = 'Already Paid';
                 
-                // Clear form fields for potential new payment
+                // Keep the invoice info showing "Invoice Status: PAID" (already set after payment)
+                // Don't reload invoice details to avoid loading the next unpaid invoice
+                
+                // Clear only the card form fields but keep payment amount and invoice info
                 document.getElementById('cardholder-name').value = '';
                 document.getElementById('email').value = '';
                 document.getElementById('zip-code').value = '';
                 document.getElementById('card-errors').textContent = '';
                 
-                console.log('✅ Payment form restored');
+                console.log('✅ Payment form restored with paid status maintained');
             }
             
             // Initialize everything on page load

@@ -3,9 +3,9 @@
     <fullName>Payment_Method_lookup__c</fullName>
     <deleteConstraint>SetNull</deleteConstraint>
     <label>Payment Method lookup</label>
-    <referenceTo>Payment</referenceTo>
-    <relationshipLabel>Payments</relationshipLabel>
-    <relationshipName>Payments</relationshipName>
+    <referenceTo>Payment_Method__c</referenceTo>
+    <relationshipLabel>Payment Records</relationshipLabel>
+    <relationshipName>Payment_Records</relationshipName>
     <required>false</required>
     <trackTrending>false</trackTrending>
     <type>Lookup</type>

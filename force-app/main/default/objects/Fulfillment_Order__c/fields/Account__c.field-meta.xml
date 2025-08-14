@@ -3,7 +3,6 @@
     <fullName>Account__c</fullName>
     <label>Account</label>
     <referenceTo>Account</referenceTo>
-    <relationshipLabel>Fulfillment Orders</relationshipLabel>
     <relationshipName>Fulfillment_Orders</relationshipName>
     <relationshipOrder>0</relationshipOrder>
     <reparentableMasterDetail>false</reparentableMasterDetail>

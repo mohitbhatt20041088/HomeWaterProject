@@ -19,7 +19,7 @@ public with sharing class PostPaymentOrderProcessingHelper {
             }
             
             // Call the main processing method
-            String result = PostPaymentOrderProcessingController.processOrderAfterPayment(orderId, null, paymentIntentId);
+            String result = PostPaymentOrderProcessingController.processPaymentCompletedOrder(orderId, paymentIntentId);
             
             return result;
             
@@ -75,9 +75,8 @@ public with sharing class PostPaymentOrderProcessingHelper {
             // Process each order
             for (Order order : pendingOrders) {
                 try {
-                    String orderResult = PostPaymentOrderProcessingController.processOrderAfterPayment(
+                    String orderResult = PostPaymentOrderProcessingController.processPaymentCompletedOrder(
                         order.Id, 
-                        null, 
                         paymentIntentId
                     );
                     
