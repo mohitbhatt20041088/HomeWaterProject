@@ -1037,7 +1037,7 @@ public with sharing class StripeIntentController {
             
             // Query the custom Invoice__c object with BillingAccountId__c
             List<Invoice__c> invoices = [SELECT Id, Name, Status__c, TotalChargeAmountWithTax__c, Balance__c,
-                                                Payment_Status__c, Payment_Link__c, BillingAccountId__c, CreatedDate, InvoiceDate__c
+                                                Payment_Status__c, Payment_Link__c, BillingAccountId__c, CreatedDate, InvoiceDate__c,First_Invoice__c
                                         FROM Invoice__c 
                                         WHERE Id = :invoiceId 
                                         LIMIT 1];
@@ -1077,13 +1077,50 @@ public with sharing class StripeIntentController {
             System.debug('🔄 ========== UPDATING INVOICE ==========');
             inv.Payment_Status__c = 'Paid';
             inv.Status__c = 'Posted';
-            inv.Balance__c = 0; 
-            inv.Payment_Link__c = getVFPageURL(invoiceId);
+            inv.Balance__c = 0;
+            // inv.Payment_Link__c = getVFPageURL(invoiceId);
             
             update inv;
             
             System.debug('Invoice updated successfully (immediate)');
             System.debug('New Status: ' + inv.Status__c + ' | New Balance: ' + inv.Balance__c);
+            
+            //!========= Logic to set First_Invoice__c to true for the current invoice and false for others
+                List<Invoice__c> allInvoices = [
+                SELECT Id, First_Invoice__c, CreatedDate
+                FROM Invoice__c
+                WHERE BillingAccountId__c = :inv.BillingAccountId__c
+                ORDER BY CreatedDate ASC
+            ];
+            
+            if (!allInvoices.isEmpty()) {
+                // The first invoice in the sorted list is the true first invoice
+                Id firstInvoiceId = allInvoices[0].Id;
+            
+                List<Invoice__c> invoicesToUpdate = new List<Invoice__c>();
+                for (Invoice__c invoice : allInvoices) {
+                    // If the current invoice in the loop is the first one and its checkbox is not already true
+                    if (invoice.Id == firstInvoiceId && !invoice.First_Invoice__c) {
+                        invoice.First_Invoice__c = true;
+                        invoicesToUpdate.add(invoice);
+                    }
+                    // If the current invoice is not the first one but its checkbox is currently true
+                    else if (invoice.Id != firstInvoiceId && invoice.First_Invoice__c) {
+                        invoice.First_Invoice__c = false;
+                        invoicesToUpdate.add(invoice);
+                    }
+                }
+            
+                // Perform the update if there are any changes
+                if (!invoicesToUpdate.isEmpty()) {
+                    update invoicesToUpdate;
+                }
+            }
+            //! =====================END==================================//
+
+
+
+
             
             // Create payment method and payment records using the detailed Stripe data
             String paymentMethodId = null;
@@ -1223,7 +1260,7 @@ public with sharing class StripeIntentController {
                     SELECT Id, Installation_Type__c, AccountId, Status, CreatedDate
                     FROM Order 
                     WHERE AccountId = :inv.BillingAccountId__c
-                    AND (Status = 'Activated' OR Status = 'Draft')
+                    AND (Status = 'Activated' OR Status = 'Order Placed')
                     AND CreatedDate = TODAY
                     ORDER BY CreatedDate DESC, Status ASC  // Prioritize Activated orders first, then Draft
                     LIMIT 5
@@ -1235,7 +1272,7 @@ public with sharing class StripeIntentController {
                         System.debug('🔍 Checking order: ' + order.Id + ' | Status: ' + order.Status + ' | Installation Type: ' + order.Installation_Type__c);
                         
                         // If order is Draft, activate it first after successful payment
-                        if (order.Status == 'Draft') {
+                        if (order.Status == 'Order Placed') {
                             System.debug('📋 Order is in Draft status, activating after successful payment...');
                             try {
                                 order.Status = 'Activated';
@@ -1253,7 +1290,7 @@ public with sharing class StripeIntentController {
                         
                         // Process the order based on installation type using the PostPaymentOrderProcessingController
                         try {
-                            String orderProcessingResult = PostPaymentOrderProcessingController.processPaymentCompletedOrder(
+                            String orderProcessingResult = PostPaymentOrderProcessingHelper.processOrderByIdAfterPayment(
                                 orderId, 
                                 stripePaymentIntentId
                             );
@@ -1332,8 +1369,8 @@ public with sharing class StripeIntentController {
             System.debug('=====account Id in URL =======> '+ e.getMessage());
         }
 
-        String fullURL = baseURL + pageRef.getUrl() + '?' + 'invoiceId=' + invoiceId + '&' + 'accountId=' + accId;
-
+        // String fullURL = baseURL + pageRef.getUrl() + '?' + 'invoiceId=' + invoiceId + '&' + 'accountId=' + accId;
+        String fullURL = baseURL + pageRef.getUrl() + '?' + 'accountId=' + accId + '&' + 'invoiceId=' + invoiceId;
         return fullURL;
     }
 

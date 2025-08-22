@@ -1,0 +1,311 @@
+/* Container */
+.product-term-container {
+    max-width: 800px;
+    margin: 0 auto;
+    background: #f8f9fa;
+    font-family: 'Salesforce Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    border: 1px solid #e9ecef;
+}
+
+/* Tab Navigation */
+.tab-navigation {
+    display: flex;
+    border-bottom: 1px solid #e9ecef;
+    background: white;
+}
+
+.tab-item {
+    flex: 1;
+    padding: 1rem;
+    text-align: center;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #6c757d;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.tab-active {
+    color: #007bff;
+    border-bottom-color: #007bff;
+    background: #f8f9fa;
+}
+
+/* Content Area */
+.content-area {
+    background: white;
+    padding: 2rem;
+}
+
+.section {
+    margin-bottom: 2rem;
+}
+
+.section-label {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #495057;
+    margin: 0 0 1rem 0;
+}
+
+/* Option List */
+.option-list {
+    border: 1px solid #e9ecef;
+    border-radius: 0.25rem;
+    background: white;
+}
+
+.option-item {
+    display: flex;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid #e9ecef;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.option-item:last-child {
+    border-bottom: none;
+}
+
+.option-item:hover {
+    background: #f8f9fa;
+}
+
+.option-radio {
+    margin: 0 0.75rem 0 0;
+    accent-color: #007bff;
+}
+
+.option-text {
+    flex: 1;
+    font-size: 0.875rem;
+    color: #495057;
+}
+
+.option-price {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #495057;
+}
+
+/* Loading State */
+.loading-state {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    color: #6c757d;
+    font-size: 0.875rem;
+}
+
+.loading-text {
+    margin: 0;
+}
+
+
+
+
+/* Navigation Buttons */
+.navigation-buttons {
+    /* display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem 2rem;
+    background: #f8f9fa;
+    border-top: 1px solid #e9ecef;
+    gap: 1rem; */
+     /* display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem 0; */
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    padding: 1rem;
+    border-top: 1px solid #e5e7eb;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+    display: flex;
+    gap: 4rem;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    /* gap: 0.5rem; */
+    /* padding: 0.75rem 0; */
+}
+
+.nav-button {
+    min-width: 120px;
+    font-size: 0.875rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .main-title {
+        font-size: 2rem;
+    }
+    
+    .header-content {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .payment-type-section,
+    .rental-plans-section,
+    .navigation-section {
+        margin-left: 0.5rem;
+        margin-right: 0.5rem;
+        padding: 1.5rem;
+    }
+    
+    .payment-options-grid,
+    .plans-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    
+    .navigation-buttons {
+        flex-direction: column;
+    }
+    
+    .nav-button {
+        width: 100%;
+        min-width: auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .header-section {
+        padding: 2rem 1rem;
+    }
+    
+    .main-title {
+        font-size: 1.75rem;
+    }
+    
+    .payment-option-label,
+    .plan-card-label {
+        padding: 1rem;
+    }
+    
+    .price-amount {
+        font-size: 2.5rem;
+    }
+}
+
+/* Animation for section transitions */
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.payment-type-section,
+.rental-plans-section {
+    animation: slideInUp 0.6s ease-out;
+}
+
+/* Focus states for accessibility */
+.payment-radio-input:focus + .payment-option-label,
+.plan-radio-input:focus + .plan-card-label {
+    outline: 3px solid rgba(102, 126, 234, 0.5);
+    outline-offset: 2px;
+}
+
+/* Compact styles for less oversized appearance */
+.product-term-container.compact {
+    max-width: 900px; /* Reduced from 1200px */
+    min-height: auto; /* Removed min-height: 100vh */
+}
+
+.header-section.compact {
+    padding: 2rem 1.5rem; /* Reduced from 4rem 2rem */
+}
+
+.header-icon.compact {
+    padding: 0.75rem; /* Reduced from 1rem */
+}
+
+.main-title.compact {
+    font-size: 2rem; /* Reduced from 2.75rem */
+}
+
+.main-subtitle.compact {
+    font-size: 1rem; /* Reduced from 1.25rem */
+    margin: 0.5rem 0 0 0; /* Reduced from 1rem 0 0 0 */
+}
+
+.payment-type-section {
+    padding: 2rem 1.5rem; /* Reduced from 3.5rem 2rem */
+    margin: -2rem 1rem 1rem 1rem; /* Reduced margins */
+}
+
+.section-title {
+    font-size: 1.5rem; /* Reduced from 2rem */
+    margin: 0 0 2rem 0; /* Reduced from 0 0 3rem 0 */
+}
+
+.payment-option-label {
+    padding: 1.75rem 1.5rem; /* Reduced from 2.5rem 2rem */
+    min-height: 180px; /* Reduced from 220px */
+}
+
+.payment-option-icon {
+    width: 4rem; /* Reduced from 5rem */
+    height: 4rem; /* Reduced from 5rem */
+    margin: 0 auto 1.5rem auto; /* Reduced from 0 auto 2rem auto */
+}
+
+.payment-option-title {
+    font-size: 1.25rem; /* Reduced from 1.5rem */
+    margin: 0 0 1rem 0; /* Reduced from 0 0 1.5rem 0 */
+}
+
+.rental-plans-section {
+    padding: 2rem 1.5rem; /* Reduced from 3rem 2rem */
+    margin: 0 1rem 1rem 1rem; /* Reduced margins */
+}
+
+.plan-card-label {
+    padding: 1.5rem 1.25rem; /* Reduced from 2rem 1.75rem */
+    min-height: 160px; /* Reduced from 200px */
+}
+
+.plan-duration {
+    font-size: 1.125rem; /* Reduced from 1.25rem */
+}
+
+.price-amount {
+    font-size: 2.5rem; /* Reduced from 3.25rem */
+}
+
+.price-currency {
+    font-size: 1.5rem; /* Reduced from 1.75rem */
+}
+
+.price-period {
+    font-size: 1rem; /* Reduced from 1.125rem */
+}
+
+.navigation-section {
+    padding: 2rem 1.5rem; /* Reduced from 2.5rem 2rem */
+    margin: 0 1rem; /* Reduced margins */
+}
+
+.nav-button {
+    min-width: 140px; /* Reduced from 180px */
+    padding: 0.75rem 1.25rem; /* Reduced from 0.875rem 1.5rem */
+    font-size: 0.9rem; /* Reduced from 1rem */
+}

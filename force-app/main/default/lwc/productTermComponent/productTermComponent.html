@@ -1,0 +1,98 @@
+<template>
+    <div class="product-term-container">
+        <!-- Tab Navigation -->
+        <div class="tab-navigation">
+            <div class="tab-item tab-active">PRODUCT</div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="content-area">
+            <!-- Option Section -->
+            <div class="section">
+                <h3 class="section-label">Option</h3>
+                
+                <!-- Payment Options -->
+                <div class="option-list">
+                    <label class="option-item">
+                        <input 
+                            type="radio" 
+                            name="paymentType" 
+                            value="upfront"
+                            onchange={handleMainOptionChange}
+                            class="option-radio"
+                        />
+                        <span class="option-text">Upfront</span>
+                        <span class="option-price">USD {formattedBasePrice}</span>
+                    </label>
+                    
+                    <label class="option-item">
+                        <input 
+                            type="radio" 
+                            name="paymentType" 
+                            value="rent_to_own"
+                            onchange={handleMainOptionChange}
+                            class="option-radio"
+                        />
+                        <span class="option-text">Rent to Own</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Plan Section (shown when Rent to Own is selected) -->
+            <template if:true={isRentToOwnSelected}>
+                <div class="section">
+                    <h3 class="section-label">Plan</h3>
+                    
+                    <!-- Plan Options -->
+                    <template if:true={planOptionsForTemplate}>
+                        <div class="option-list">
+                            <label class="option-item">
+                                <input 
+                                    type="radio" 
+                                    name="planType" 
+                                    value="none"
+                                    onchange={handlePlanChange}
+                                    class="option-radio"
+                                    checked
+                                />
+                                <span class="option-text">None</span>
+                            </label>
+                            
+                            <template for:each={planOptionsForTemplate} for:item="plan">
+                                <label key={plan.value} class="option-item">
+                                    <input 
+                                        type="radio" 
+                                        name="planType" 
+                                        value={plan.value}
+                                        onchange={handlePlanChange}
+                                        class="option-radio"
+                                    />
+                                    <span class="option-text">{plan.label}</span>
+                                    <span class="option-price">USD {plan.monthlyPrice}</span>
+                                </label>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </template>
+        </div>
+
+        <!-- Navigation Buttons -->
+        <div class="navigation-buttons">
+            <lightning-button
+                label="Back to Products"
+                variant="neutral"
+                onclick={handleBackToProducts}
+                class="nav-button">
+            </lightning-button>
+            
+            <lightning-button
+                label="Continue"
+                variant="brand"
+                onclick={handleNext}
+                disabled={isNextDisabled}
+                class="nav-button">
+            </lightning-button>
+        </div>
+    </div>
+</template>

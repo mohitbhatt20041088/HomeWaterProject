@@ -1,181 +1,586 @@
 <template>
-    <lightning-card title="Selected Products" icon-name="standard:product">
-        <template if:true={products}>
-            <template if:true={products.length}>
-                <div class="slds-p-around_medium">
-                    <template for:each={products} for:item="product">
-                        <div key={product.Id} class="slds-box slds-theme_default slds-m-bottom_medium">
-                            <!-- Product Card -->
-                            <div class="slds-grid slds-gutters">
-                                <!-- Product Image and Details -->
-                                <div class="slds-col slds-size_1-of-2">
-                                    <div class="slds-media">
-                                        <div class="slds-media__figure">
-                                            <template if:true={product.imageUrl}>
-                                                <img src={product.imageUrl} alt={product.Name} class="product-detail-image" />
-                                            </template>
-                                            <template if:false={product.imageUrl}>
-                                                <div class="slds-avatar slds-avatar_large product-detail-placeholder">
-                                                    <lightning-icon icon-name="standard:product" size="large"></lightning-icon>
-                                                </div>
-                                            </template>
-                                        </div>
-                                        <div class="slds-media__body">
-                            <h3 class="slds-text-heading_medium">{product.Name}</h3>
-                            <div class="slds-text-body_small slds-m-top_small">
-                                <template if:true={product.Billing_Type__c}>
-                                    <p><strong>Type:</strong> {product.Billing_Type__c}</p>
-                                </template>
-                                <template if:true={product.Installation_Type__c}>
-                                    <p><strong>Installation:</strong> {product.Installation_Type__c}</p>
-                                </template>
-                                <template if:true={product.Family}>
-                                    <p><strong>Family:</strong> {product.Family}</p>
-                                </template>
-                                <template if:true={product.Stage__c}>
-                                    <p><strong>Stage:</strong> {product.Stage__c}</p>
-                                </template>
-                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Product Info Only -->
-                                <div class="slds-col slds-size_1-of-2">
-                                    <div class="product-info-section slds-box slds-theme_shade">
-                                        <h4 class="slds-text-heading_small slds-m-bottom_small">Product Information</h4>
-                                        
-                                        <!-- Individual Quantity Selection for this product -->
-                                        <div class="slds-form-element slds-m-bottom_small">
-                                            <lightning-input
-                                                type="number"
-                                                name="quantity"
-                                                label="Quantity"
-                                                value="1"
-                                                min="1"
-                                                step="1"
-                                                data-product-id={product.Id}
-                                                onchange={handleIndividualQuantityChange}>
-                                            </lightning-input>
-                                        </div>
-                                        
-                                        <!-- Show unit price and subtotal for reference -->
-                                        <div class="slds-grid slds-gutters_small">
-                                            <div class="slds-col slds-size_1-of-2">
-                                                <span>Unit Price:</span>
-                                            </div>
-                                            <div class="slds-col slds-size_1-of-2 slds-text-align_right">
-                                                <span>${product.unitPrice}</span>
-                                            </div>
-                                        </div>
-                                        <div class="slds-grid slds-gutters_small">
-                                            <div class="slds-col slds-size_1-of-2">
-                                                <span>Subtotal:</span>
-                                            </div>
-                                            <div class="slds-col slds-size_1-of-2 slds-text-align_right">
-                                                <span>${product.subtotal}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+  <lightning-card title="Selected Products" icon-name="standard:product">
+    <template if:true={products}>
+      <template if:true={products.length}>
+        <div class="slds-p-around_medium">
+          <template for:each={products} for:item="product">
+            <div key={product.Id} class="slds-box slds-theme_default slds-m-bottom_medium product-card-with-actions">
+              <!-- Dustbin icon for removing product -->
+              <button class="remove-product-icon" data-product-id={product.Id} onclick={handleRemoveProduct}
+                title="Remove Product">
+                <lightning-icon icon-name="utility:delete" size="x-small" alternative-text="Remove Product"
+                  data-product-id={product.Id}>
+                </lightning-icon>
+              </button>
+
+              <!-- Combined Product Information Block -->
+              <div class="product-info-section slds-box slds-theme_shade">
+                <!-- <h4 class="slds-text-heading_small slds-m-bottom_medium">Product Information</h4> -->
+
+                <!-- Two-column layout: Product details left, Quantity/Pricing right -->
+                <div class="slds-grid slds-gutters">
+                  <!-- Left Column: Product Image and Details -->
+                  <div class="slds-col slds-size_1-of-2">
+                    <div class="slds-media">
+                      <div class="slds-media__figure">
+                        <template if:true={product.imageUrl}>
+                          <img src={product.imageUrl} alt={product.Name} class="product-detail-image" />
+                        </template>
+                        <template if:false={product.imageUrl}>
+                          <div class="slds-avatar slds-avatar_large product-detail-placeholder">
+                            <lightning-icon icon-name="standard:product" size="large"></lightning-icon>
+                          </div>
+                        </template>
+                      </div>
+                      <div class="slds-media__body">
+                        <h3 class="slds-text-heading_medium">{product.Name}</h3>
+                        <div class="slds-text-body_small slds-m-top_small">
+                          <template if:true={product.Billing_Type__c}>
+                            <p>
+                              <strong>Type:</strong> {product.Billing_Type__c}
+                            </p>
+                          </template>
+                          <template if:true={product.Installation_Type__c}>
+                            <p>
+                              <strong>Installation:</strong>
+                              {product.Installation_Type__c}
+                            </p>
+                          </template>
+                          <template if:true={product.Family}>
+                            <p><strong>Family:</strong> {product.Family}</p>
+                          </template>
+                          <template if:true={product.Stage__c}>
+                            <p><strong>Stage:</strong> {product.Stage__c}</p>
+                          </template>
                         </div>
-                    </template>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Right Column: Quantity, Unit Price, Subtotal -->
+                  <div class="slds-col slds-size_1-of-2">
+                    <!-- Individual Quantity Selection -->
+                    <div class="slds-grid slds-gutters_small pricing-row">
+                      <div class="slds-col slds-size_1-of-2">
+                        <span style="margin-top: 22px">Quantity:</span>
+                      </div>
+                      <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                        <div class="quantity-input-container">
+                          <lightning-input type="number" name="quantity" value="1" min="1" step="1"
+                            data-product-id={product.Id} onchange={handleIndividualQuantityChange}
+                            class="quantity-input-field">
+                          </lightning-input>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Show unit price and subtotal for reference -->
+                    <div class="slds-grid slds-gutters_small pricing-row">
+                      <div class="slds-col slds-size_1-of-2">
+                        <span>Unit Price:</span>
+                      </div>
+                      <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                        <span>${product.unitPrice}</span>
+                      </div>
+                    </div>
+                    <div class="slds-grid slds-gutters_small pricing-row">
+                      <div class="slds-col slds-size_1-of-2">
+                        <span>Subtotal:</span>
+                      </div>
+                      <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                        <span>${product.subtotal}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                
-                <!-- Unified Pricing Section (Like Amazon/Flipkart) -->
-                <div class="slds-box slds-theme_default slds-m-top_large">
-                    <div class="slds-grid slds-gutters">
-                        <!-- Left Side: Product Terms Selection -->
-                        <div class="slds-col slds-size_1-of-2">
-                            <h4 class="slds-text-heading_medium slds-m-bottom_medium">Order Summary</h4>
-                            
-                            <!-- Global Product Terms Selection -->
-                            <div class="slds-form-element slds-m-bottom_medium">
-                                <lightning-combobox
-                                    name="productTerms"
-                                    label="Product Terms (Applied to All Products)"
-                                    placeholder="Select Product Terms"
-                                    options={productTermOptions}
-                                    value={selectedProductTerm}
-                                    onchange={handleProductTermChange}
-                                    disabled>
-                                </lightning-combobox>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Price Details Section -->
+        <div class="slds-box slds-theme_default slds-m-top_large">
+          <div class="slds-grid slds-gutters slds-grid_align-end">
+            <!-- Price Breakdown - Full Width -->
+            <div class="slds-col slds-size_1-of-1">
+              <div class="pricing-summary slds-box slds-theme_shade">
+                <h4 class="slds-text-heading_medium slds-m-bottom_medium slds-text-align_center">
+                  Price Details
+                </h4>
+
+                <!-- Product Terms (as text display) -->
+                <div class="slds-grid slds-gutters_small slds-m-bottom_small product-term-display">
+                  <div class="slds-col slds-size_1-of-2">
+                    <span class="slds-text-body_regular"><strong>Payment Term:</strong></span>
+                  </div>
+                  <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                    <span class="slds-text-body_regular"><strong>{selectedProductTermLabel}</strong></span>
+                  </div>
+                </div>
+
+                <!-- Divider -->
+                <hr class="slds-m-vertical_small" />
+
+                <!-- Subtotal -->
+                <div class="slds-grid slds-gutters_small slds-m-bottom_small">
+                  <div class="slds-col slds-size_1-of-2">
+                    <span class="slds-text-body_regular">Subtotal ({products.length} items):</span>
+                  </div>
+                  <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                    <span class="slds-text-body_regular">${totalPriceWithoutTax}</span>
+                  </div>
+                </div>
+
+                <!-- Tax -->
+                <div class="slds-grid slds-gutters_small slds-m-bottom_small">
+                  <div class="slds-col slds-size_1-of-2">
+                    <span class="slds-text-body_regular">Tax (10%):</span>
+                  </div>
+                  <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                    <span class="slds-text-body_regular">${taxAmount}</span>
+                  </div>
+                </div>
+
+                <!-- Divider -->
+                <hr class="slds-m-vertical_small" />
+
+                <!-- Grand Total -->
+                <div class="slds-grid slds-gutters_small slds-p-vertical_small total-amount-row">
+                  <div class="slds-col slds-size_1-of-2">
+                    <strong class="slds-text-heading_small">Total Amount:</strong>
+                  </div>
+                  <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                    <strong class="slds-text-heading_medium"
+                      style="color: #1b96ff; font-size: 1.25rem">${totalPriceWithTax}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Selected Payment Terms Display -->
+        <!-- <template if:true={selectedProductTerm}>
+                    <div class="slds-box slds-theme_info slds-m-top_medium">
+                        <h5 class="slds-text-heading_small slds-m-bottom_small">Selected Payment Terms</h5>
+                        <div class="slds-grid slds-gutters_small">
+                            <div class="slds-col slds-size_1-of-2">
+                                <span><strong>Payment Method:</strong> {paymentMethodLabel}</span>
                             </div>
-                        </div>
-                        
-                        <!-- Right Side: Price Breakdown -->
-                        <div class="slds-col slds-size_1-of-2">
-                            <div class="pricing-summary slds-box slds-theme_shade">
-                                <h5 class="slds-text-heading_small slds-m-bottom_small">Price Details</h5>
-                                
-                                <!-- Subtotal -->
-                                <div class="slds-grid slds-gutters_small slds-m-bottom_x-small">
-                                    <div class="slds-col slds-size_1-of-2">
-                                        <span>Subtotal ({products.length} items):</span>
-                                    </div>
-                                    <div class="slds-col slds-size_1-of-2 slds-text-align_right">
-                                        <span>${totalPriceWithoutTax}</span>
-                                    </div>
-                                </div>
-                                
-                                <!-- Tax -->
-                                <div class="slds-grid slds-gutters_small slds-m-bottom_x-small">
-                                    <div class="slds-col slds-size_1-of-2">
-                                        <span>Tax (10%):</span>
-                                    </div>
-                                    <div class="slds-col slds-size_1-of-2 slds-text-align_right">
-                                        <span>${taxAmount}</span>
-                                    </div>
-                                </div>
-                                
-                                <!-- Divider -->
-                                <hr class="slds-m-vertical_small">
-                                
-                                <!-- Grand Total -->
-                                <div class="slds-grid slds-gutters_small">
-                                    <div class="slds-col slds-size_1-of-2">
-                                        <strong class="slds-text-heading_small">Total Amount:</strong>
-                                    </div>
-                                    <div class="slds-col slds-size_1-of-2 slds-text-align_right">
-                                        <strong class="slds-text-heading_small" style="color: #1B96FF;">${totalPriceWithTax}</strong>
-                                    </div>
-                                </div>
+                            <div class="slds-col slds-size_1-of-2">
+                                <span><strong>Term:</strong> {selectedProductTermLabel}</span>
                             </div>
                         </div>
                     </div>
-                </div>
-                
-                <!-- Action Buttons -->
-                <div class="slds-m-top_large slds-text-align_center">
-                    <lightning-button 
-                        label="Proceed" 
-                        variant="brand" 
-                        onclick={handleAddToCart}
-                        class="slds-m-right_small">
-                    </lightning-button>
-                    <lightning-button 
-                        label="Back to Products" 
-                        variant="neutral" 
-                        onclick={handleBackToProducts}>
-                    </lightning-button>
-                </div>
-            </template>
-            
-            <!-- No Products Selected -->
-            <template if:false={products.length}>
-                <div class="slds-align_absolute-center slds-p-around_large">
-                    <div class="slds-text-heading_medium">No products selected</div>
-                    <div class="slds-text-body_regular slds-m-top_small">Please go back and select some products first.</div>
-                </div>
-            </template>
-        </template>
+                </template> -->
 
-        <!-- Loading State -->
-        <template if:false={products}>
-            <div class="slds-align_absolute-center slds-p-around_large">
-                <lightning-spinner alternative-text="Loading product details..." size="medium"></lightning-spinner>
+        <!-- Action Buttons -->
+        <!-- Action Buttons - Fixed at Bottom -->
+        <div class="action-buttons-container">
+          <lightning-button label="Back to Terms" variant="neutral" onclick={handleBackToTerms} class="back-button">
+          </lightning-button>
+          <lightning-button label="Proceed" variant="brand" onclick={handleAddToCart} class="proceed-button">
+          </lightning-button>
+        </div>
+      </template>
+
+      <!-- No Products Selected -->
+      <template if:false={products.length}>
+        <div class="slds-align_absolute-center slds-p-around_medium no-products-container">
+          <div class="slds-illustration slds-illustration_large">
+            <lightning-icon icon-name="standard:product" size="large" class="no-products-icon"></lightning-icon>
+          </div>
+          <div class="slds-text-heading_medium slds-m-top_medium no-products-title">
+            No Products Selected
+          </div>
+          <div class="slds-text-body_regular slds-text-color_weak slds-m-top_small no-products-message">
+            Please go back and select some products first to view your order
+            details.
+          </div>
+          <div class="slds-m-top_medium">
+            <lightning-button label="Back to Products" variant="brand" onclick={handleBackToProducts}
+              class="no-products-btn">
+            </lightning-button>
+          </div>
+        </div>
+      </template>
+    </template>
+    <!-- Enhanced Recommended Products Section -->
+    <div class="slds-p-around_medium recommended-products-section">
+      <!-- Header with enhanced design -->
+      <div class="recommendation-header">
+        <div class="header-content">
+          <div class="header-icon">
+            <lightning-icon icon-name="utility:sparkles" size="small" class="sparkles-icon"></lightning-icon>
+          </div>
+          <div class="header-text">
+            <h2 class="slds-text-heading_large recommendation-title">
+              You might also like
+            </h2>
+            <p class="slds-text-body_small recommendation-subtitle">
+              Showing recommendations based on your selected products
+            </p>
+          </div>
+          <div class="header-actions">
+            <lightning-button label="View All" onclick={handleToggleViewAll} variant="outline-brand" size="small"
+              class="view-all-btn">
+            </lightning-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Filter Chips -->
+      <!-- <div class="quick-filters">
+                  <div class="filter-chips">
+                      <template if:true={activeFilters.length}>
+                          <span class="filter-label">Filters:</span>
+                          <template for:each={activeFilters} for:item="filter">
+                              <span key={filter.key} class="filter-chip">
+                                  <span class="chip-label">{filter.label}</span>
+                                  <button class="chip-remove" onclick={handleRemoveFilter}
+                                      data-filter-key={filter.key} title="Remove filter">
+                                      <lightning-icon icon-name="utility:close" size="x-small"></lightning-icon>
+                                  </button>
+                              </span>
+                          </template>
+                          <button class="clear-all-filters" onclick={handleClearAllFilters}>
+                              Clear all
+                          </button>
+                      </template>
+                      <template if:false={activeFilters.length}>
+                          <span class="no-filters-text">Showing recommendations based on your selected products</span>
+                      </template>
+                  </div>
+              </div> -->
+
+      <!-- Advanced Filters Panel (Collapsible) -->
+      <div class={filtersContainerClass}>
+        <div class="filters-header">
+          <button class="filters-toggle" onclick={handleToggleFilters}>
+            <lightning-icon icon-name="utility:filter" size="x-small" class="filter-icon"></lightning-icon>
+            <span>Advanced Filters</span>
+            <lightning-icon icon-name={filtersToggleIcon} size="x-small" class="toggle-icon"></lightning-icon>
+          </button>
+        </div>
+
+        <template if:true={showAdvancedFilters}>
+          <div class="filters-content">
+            <!-- Search Box -->
+            <!-- <div class="search-container">
+                              <lightning-input type="search" name="productSearch" label="Search Products"
+                                  placeholder="Search by name or description..." value={searchTerm}
+                                  onchange={handleSearchChange} class="product-search">
+                              </lightning-input>
+                          </div> -->
+
+            <!-- Filter Grid with Pill Buttons -->
+            <div class="filter-sections">
+
+              <!-- Billing Type Section -->
+              <div class="filter-section">
+                <h3 class="filter-section-title">Billing Type</h3>
+                <p class="filter-section-subtitle">Please select your preferred billing type</p>
+                <div class="pill-button-group">
+                  <template for:each={billingTypeFilterOptions} for:item="option">
+                    <button key={option.value} class={option.cssClass} data-value={option.value}
+                      data-filter="billingType" onclick={handleFilterPillClick} aria-label={option.label}
+                      title={option.label}>
+                      {option.label}
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Product Family Section -->
+              <div class="filter-section">
+                <h3 class="filter-section-title">Product Family</h3>
+                <p class="filter-section-subtitle">Please select the product family</p>
+                <div class="pill-button-group">
+                  <template for:each={familyTypeFilterOptions} for:item="option">
+                    <button key={option.value} class={option.cssClass} data-value={option.value}
+                      data-filter="familyType" onclick={handleFilterPillClick} aria-label={option.label}
+                      title={option.label}>
+                      {option.label}
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Stage Type Section -->
+              <div class="filter-section">
+                <h3 class="filter-section-title">Stage Type</h3>
+                <p class="filter-section-subtitle">Please select the stage type</p>
+                <div class="pill-button-group">
+                  <template for:each={stageTypeFilterOptions} for:item="option">
+                    <button key={option.value} class={option.cssClass} data-value={option.value} data-filter="stageType"
+                      onclick={handleFilterPillClick} aria-label={option.label} title={option.label}>
+                      {option.label}
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Preferred Block Section -->
+              <div class="filter-section">
+                <h3 class="filter-section-title">Preferred Block</h3>
+                <p class="filter-section-subtitle">Please select your preferred block</p>
+                <div class="pill-button-group">
+                  <template for:each={preferredBlockTypeFilterOptions} for:item="option">
+                    <button key={option.value} class={option.cssClass} data-value={option.value}
+                      data-filter="preferredBlockType" onclick={handleFilterPillClick} aria-label={option.label}
+                      title={option.label}>
+                      {option.label}
+                    </button>
+                  </template>
+                </div>
+              </div>
+
             </div>
+
+            <!-- Filter Actions -->
+            <div class="filter-actions">
+              <lightning-button label="Reset Filters" onclick={handleResetFilters} variant="neutral" size="small"
+                icon-name="utility:refresh" class="reset-btn">
+              </lightning-button>
+              <lightning-button label="Apply Filters" onclick={handleApplyFilters} variant="brand" size="small"
+                icon-name="utility:check" class="apply-btn">
+              </lightning-button>
+            </div>
+          </div>
         </template>
-    </lightning-card>
+      </div>
+
+      <!-- Enhanced Products Slider -->
+      <template if:true={hasRecommendedProducts}>
+        <div class="products-slider-container">
+          <!-- Slider Controls -->
+          <div class="slider-controls">
+            <div class="slider-info">
+              <span class="slide-counter">
+                Showing {currentSlideStart}-{currentSlideEnd} of
+                {totalRecommendations}
+              </span>
+            </div>
+            <div class="slider-buttons">
+              <button class="slider-control-btn" onclick={handleSliderPrevious} disabled={isFirstSlide}
+                title="Previous">
+                <lightning-icon icon-name="utility:chevronleft" size="small"></lightning-icon>
+              </button>
+              <button class="slider-control-btn" onclick={handleSliderNext} disabled={isLastSlide} title="Next">
+                <lightning-icon icon-name="utility:chevronright" size="small"></lightning-icon>
+              </button>
+              <!-- Auto-play button hidden from user but functionality remains active -->
+            </div>
+          </div>
+
+          <!-- Main Slider -->
+          <div class="slider-wrapper" ontouchstart={handleTouchStart} ontouchmove={handleTouchMove}
+            ontouchend={handleTouchEnd}>
+            <div class="slider-track" style={sliderTransform}>
+              <template for:each={recommendedProducts} for:item="product" for:index="index">
+                <div key={product.Id} class="slider-item" data-index={index}>
+                  <div class="enhanced-recommendation-card">
+                    <!-- Product Badge -->
+                    <template if:true={product.isPopular}>
+                      <div class="product-badge popular-badge">
+                        <lightning-icon icon-name="utility:favorite" size="xx-small"></lightning-icon>
+                        <span>Popular</span>
+                      </div>
+                    </template>
+                    <template if:true={product.isNew}>
+                      <div class="product-badge new-badge">
+                        <lightning-icon icon-name="utility:new" size="xx-small"></lightning-icon>
+                        <span>New</span>
+                      </div>
+                    </template>
+
+                    <!-- Product Image Container -->
+                    <div class="product-image-container">
+                      <template if:true={product.imageUrl}>
+                        <img src={product.imageUrl} alt={product.Name} class="product-image" loading="lazy" />
+                      </template>
+                      <template if:false={product.imageUrl}>
+                        <div class="no-image-placeholder">
+                          <lightning-icon icon-name="utility:product" size="large"
+                            class="placeholder-icon"></lightning-icon>
+                        </div>
+                      </template>
+
+                      <!-- Quick View Button -->
+                      <button class="quick-view-btn" onclick={handleQuickView} data-product-id={product.Id}
+                        title="Quick View">
+                        <lightning-icon icon-name="utility:preview" size="small"></lightning-icon>
+                      </button>
+                    </div>
+
+                    <!-- Product Content -->
+                    <div class="recommendation-content">
+                      <div class="product-header">
+                        <h3 class="product-name" title={product.Name}>
+                          {product.Name}
+                        </h3>
+                        <div class="product-rating" if:true={product.rating}>
+                          <span class="rating-stars">★★★★★</span>
+                          <span class="rating-text">({product.reviewCount})</span>
+                        </div>
+                      </div>
+
+                      <div class="product-details">
+                        <template if:true={product.Family}>
+                          <div class="detail-item">
+                            <span class="detail-label">Family:</span>
+                            <span class="detail-value">{product.Family}</span>
+                          </div>
+                        </template>
+                        <template if:true={product.Billing_Type__c}>
+                          <div class="detail-item">
+                            <span class="detail-label">Billing:</span>
+                            <span class="detail-value">{product.Billing_Type__c}</span>
+                          </div>
+                        </template>
+                        <template if:true={product.Stage__c}>
+                          <div class="detail-item">
+                            <span class="detail-label">Stage:</span>
+                            <span class="detail-value">{product.Stage__c}</span>
+                          </div>
+                        </template>
+                      </div>
+
+                      <!-- Price and Actions -->
+                      <div class="product-footer">
+                        <div class="price-container">
+                          <span class="product-price">${product.unitPrice}</span>
+                          <template if:true={product.originalPrice}>
+                            <span class="original-price">${product.originalPrice}</span>
+                          </template>
+                        </div>
+
+                        <div class="product-actions">
+                          <button class="add-to-cart-btn" onclick={handleAddRecommendedProduct}
+                            data-product-id={product.Id} title="Add to cart">
+                            <lightning-icon icon-name="utility:add" size="small" class="add-icon"></lightning-icon>
+                            <span class="btn-text">Add to Cart</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Slider Pagination -->
+          <template if:true={showSliderIndicators}>
+            <div class="slider-pagination">
+              <template for:each={sliderIndicators} for:item="indicator">
+                <button key={indicator.index} class={indicator.cssClass} onclick={handleSliderIndicatorClick}
+                  data-slide={indicator.index} title={indicator.title}></button>
+              </template>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- No Recommendations State -->
+      <template if:false={hasRecommendedProducts}>
+        <div class="no-recommendations-container">
+          <div class="no-recommendations-content">
+            <!-- Icon changes based on filter type -->
+            <div class="no-recommendations-icon">
+              <template if:true={hasUserModifiedFilters}>
+                <lightning-icon icon-name="utility:filter" size="large" class="filter-icon"></lightning-icon>
+              </template>
+              <template if:false={hasUserModifiedFilters}>
+                <lightning-icon icon-name="utility:search" size="large" class="search-icon"></lightning-icon>
+              </template>
+            </div>
+
+            <!-- Dynamic title based on filter source -->
+            <p class="slds-text-heading_small no-recommendations-title">{noRecommendationsTitle}</p>
+
+            <!-- Dynamic message based on filter source -->
+            <p class="no-recommendations-message">
+              {noRecommendationsMessage}
+            </p>
+
+            <!-- Show current active filters if any -->
+            <template if:true={hasActiveFiltersForMessage}>
+              <div class="active-filters-info">
+                <p class="filters-label">Current filters applied:</p>
+                <div class="current-filters">
+                  <template for:each={activeFilters} for:item="filter">
+                    <span key={filter.key} class="current-filter-chip">
+                      {filter.label}
+                    </span>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- Action buttons -->
+            <div class="no-recommendations-actions">
+              <template if:true={hasUserModifiedFilters}>
+                <!-- <lightning-button
+                  label="Reset to Original Filters"
+                  onclick={handleResetFilters}
+                  variant="brand"
+                  icon-name="utility:refresh"
+                  class="reset-recommendations-btn"
+                >
+                </lightning-button>
+                <lightning-button
+                  label="Clear All Filters"
+                  onclick={handleClearAllFilters}
+                  variant="neutral"
+                  icon-name="utility:clear"
+                  class="clear-all-btn"
+                >
+                </lightning-button> -->
+              </template>
+              <template if:false={hasUserModifiedFilters}>
+                <lightning-button label="Try Different Criteria" onclick={handleToggleFilters} variant="brand"
+                  icon-name="utility:filter" class="try-different-btn">
+                </lightning-button>
+              </template>
+            </div>
+
+            <!-- Helpful suggestions -->
+            <div class="suggestions-section">
+              <template if:true={hasUserModifiedFilters}>
+                <div class="suggestion-item">
+                  <lightning-icon icon-name="utility:info" size="x-small" class="suggestion-icon"></lightning-icon>
+                  <span class="suggestion-text">Try removing some filters to see more
+                    recommendations</span>
+                </div>
+                <div class="suggestion-item">
+                  <lightning-icon icon-name="utility:back" size="x-small" class="suggestion-icon"></lightning-icon>
+                  <span class="suggestion-text">Reset to original filters from the main filter
+                    component</span>
+                </div>
+              </template>
+              <template if:false={hasUserModifiedFilters}>
+                <div class="suggestion-item">
+                  <lightning-icon icon-name="utility:filter" size="x-small" class="suggestion-icon"></lightning-icon>
+                  <span class="suggestion-text">Use the advanced filters above to customize your
+                    search</span>
+                </div>
+                <div class="suggestion-item">
+                  <lightning-icon icon-name="utility:product" size="x-small" class="suggestion-icon"></lightning-icon>
+                  <span class="suggestion-text">Try different product categories or billing types</span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Loading State -->
+    <template if:false={products}>
+      <div class="slds-align_absolute-center slds-p-around_large">
+        <lightning-spinner alternative-text="Loading product details..." size="medium"></lightning-spinner>
+      </div>
+    </template>
+  </lightning-card>
 </template>

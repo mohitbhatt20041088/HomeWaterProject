@@ -1,7 +1,6 @@
 import { LightningElement, track } from 'lwc';
 import checkServiceability from '@salesforce/apex/AccountCreationController.isZipCodeServiceable';
 import createFulfillmentForNonServiceableArea from '@salesforce/apex/AccountCreationController.createFulfillmentForNonServiceableArea';
-
 export default class ZipCodeComponent extends LightningElement {
     @track zipCode = '';
     @track isVerifying = false;

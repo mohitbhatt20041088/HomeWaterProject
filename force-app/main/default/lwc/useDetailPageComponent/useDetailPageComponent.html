@@ -2,16 +2,16 @@
     <div class="slds-container_fluid slds-p-around_medium">
         
         <!-- Thank You Section (shown after successful order) -->
-        <template if:true={showThankYou}>
+        <!-- <template if:true={showThankYou}>
             <div class="slds-grid slds-grid_align-center slds-p-around_large">
                 <div class="slds-col slds-size_12-of-12 slds-large-size_8-of-12 slds-x-large-size_6-of-12">
                     <div class="slds-text-align_center">
-                        <!-- Use the existing thankYouScreenComponent -->
+                        Use the existing thankYouScreenComponent
                         <c-thank-you-screen-component></c-thank-you-screen-component>
                     </div>
                 </div>
             </div>
-        </template>
+        </template> -->
         
         <!-- Main Form (hidden when thank you is shown) -->
         <template if:false={showThankYou}>
@@ -93,7 +93,7 @@
         </div>
     
         <!-- Action Buttons -->
-        <div class="slds-m-top_large slds-text-align_center">
+        <div class="slds-m-top_large slds-text-align_center action-buttons-container">
             <lightning-button 
                 label="Back to Products" 
                 variant="neutral" 
@@ -101,7 +101,7 @@
                 class="slds-m-right_small">
             </lightning-button>
             <lightning-button 
-                label="Create Order" 
+                label="Checkout" 
                 variant="brand" 
                 onclick={handleCreateOrder} 
                 disabled={isSubmitting}>

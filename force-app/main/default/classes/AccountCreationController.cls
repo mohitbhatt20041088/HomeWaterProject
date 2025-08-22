@@ -9,6 +9,30 @@ public with sharing class AccountCreationController {
         return ZipCodeController.checkServiceability(zipCode);
     }
     
+    @AuraEnabled
+    public static String createFulfillmentForNonServiceableArea(String zipCode, String userDetails) {
+        try {
+            System.debug('Creating fulfillment for non-serviceable area - ZipCode: ' + zipCode);
+            
+            Lead nonServiceableLead = new Lead();
+            nonServiceableLead.LastName = 'Non-Serviceable Area Inquiry';
+            nonServiceableLead.Company = 'Non-Serviceable Area - ' + zipCode;
+            nonServiceableLead.PostalCode = zipCode;
+            nonServiceableLead.Status = 'New';
+            nonServiceableLead.LeadSource = 'Website - Non-Serviceable Area';
+            nonServiceableLead.Description = 'Customer inquiry from non-serviceable zip code: ' + zipCode;
+            
+            insert nonServiceableLead;
+            
+            return 'SUCCESS: Thank you for your interest. We have recorded your inquiry for zip code ' + zipCode + 
+                   '. Our team will contact you when service becomes available in your area.';
+            
+        } catch (Exception e) {
+            System.debug('Error creating fulfillment for non-serviceable area: ' + e.getMessage());
+            throw new AuraHandledException('Error processing non-serviceable area request: ' + e.getMessage());
+        }
+    }
+    
     
     @AuraEnabled
     public static string createAccountAndOrder(String firstName,String lastName,String emailAddress,String phoneNumber,String street,String city,String province,String postalCode,String country, String selectedProducts, String selectedProductTerm, String zipCodeFromComponent){
@@ -56,15 +80,28 @@ public with sharing class AccountCreationController {
             
             String resultMessage = 'SUCCESS:Person Account created successfully with ID: ' + acc.Id;
             
+            // DEBUG: Check if selectedProducts is provided
+            System.debug('=== ACCOUNT CREATION CONTROLLER DEBUG ===');
+            System.debug('selectedProducts parameter: ' + selectedProducts);
+            System.debug('selectedProducts isNotBlank: ' + String.isNotBlank(selectedProducts));
+            System.debug('selectedProductTerm: ' + selectedProductTerm);
+            System.debug('zipCodeFromComponent: ' + zipCodeFromComponent);
             
             if(String.isNotBlank(selectedProducts)) {
+                System.debug('✅ CONDITION MET: selectedProducts is not blank, calling createOrderWithProducts...');
                 try {
+                    System.debug('🚀 CALLING createOrderWithProducts method on line 86...');
                     String orderResult = createOrderWithProducts(acc.Id, selectedProducts, selectedProductTerm, zipCodeFromComponent);
+                    System.debug('✅ METHOD RETURNED: ' + orderResult);
                     resultMessage += '. ' + orderResult;
                 } catch(Exception orderException) {
-                    System.debug('Order creation failed: ' + orderException.getMessage());
+                    System.debug('❌ EXCEPTION CAUGHT in createOrderWithProducts: ' + orderException.getMessage());
+                    System.debug('❌ EXCEPTION TYPE: ' + orderException.getTypeName());
+                    System.debug('❌ STACK TRACE: ' + orderException.getStackTraceString());
                     resultMessage += '. Note: Order creation failed - ' + orderException.getMessage();
                 }
+            } else {
+                System.debug('❌ CONDITION NOT MET: selectedProducts is blank/null, skipping order creation');
             }
             
             return resultMessage;
@@ -195,16 +232,20 @@ public with sharing class AccountCreationController {
                 return 'No products have active pricebook entries in the standard pricebook. Please add products to the standard pricebook first.';
             }
 
-            Account linkedAccount = [SELECT BillingStreet,billingCity,BillingState,BillingPostalCode,BillingCountry,ShippingStreet,ShippingCity,ShippingPostalCode,ShippingCountry,ShippingState FROM Account WHERE Id =:accountId];
+            Account linkedAccount = [SELECT BillingStreet,billingCity,BillingState,BillingPostalCode,BillingCountry,ShippingStreet,ShippingCity,ShippingPostalCode,ShippingCountry,ShippingState,PersonEmail FROM Account WHERE Id =:accountId];
             
 
             Contract newContract = new Contract();
             newContract.Status = 'Draft';
             // Handle "upfront" as a single-term contract
-            if(selectedProductTerm.equalsIgnoreCase('upfront')) {
+            if(selectedProductTerm != null && selectedProductTerm.equalsIgnoreCase('upfront')) {
                 newContract.ContractTerm = 1;
-            } else {
+            } else if(selectedProductTerm != null) {
                 newContract.ContractTerm = Integer.valueOf(selectedProductTerm);
+            } else {
+                // If selectedProductTerm is null, default to 1 (assuming upfront)
+                System.debug('WARNING: selectedProductTerm is null, defaulting to 1 month contract (upfront)');
+                newContract.ContractTerm = 1;
             }
             newContract.AccountId = linkedAccount.Id;
             newContract.BillingStreet = linkedAccount.BillingStreet;
@@ -221,9 +262,10 @@ public with sharing class AccountCreationController {
 
             Order newOrder = new Order();
             newOrder.AccountId = accountId;
-            newOrder.Status = 'Draft';
+            newOrder.Status = 'Order Placed';
             newOrder.EffectiveDate = Date.today();
             newOrder.Type = 'Service';
+            newOrder.Email__c = linkedAccount.PersonEmail;
             newOrder.Pricebook2Id = standardPricebook.Id;
             newOrder.BillingStreet = linkedAccount.BillingStreet;
             newOrder.BillingCity = linkedAccount.BillingCity;
@@ -337,7 +379,16 @@ public with sharing class AccountCreationController {
                     
                     // Add 10% tax to the unit price
                     finalItem.UnitPrice = basePrice * 1.10;
-                    if(String.isNotBlank(selectedProductTerm))finalItem.Product_Terms__c = selectedProductTerm;
+                    
+                    // Set Product_Terms__c field - handle upfront and regular terms
+                    System.debug('Setting Product_Terms__c to: "' + selectedProductTerm + '"');
+                    if(String.isNotBlank(selectedProductTerm)) {
+                        finalItem.Product_Terms__c = selectedProductTerm;
+                    } else {
+                        System.debug('WARNING: selectedProductTerm is blank/null!');
+                        // Set a default value for upfront if needed
+                        finalItem.Product_Terms__c = 'Upfront';
+                    }
                     
                     System.debug('Final OrderItem: OrderId=' + finalItem.OrderId + ', PricebookEntryId=' + finalItem.PricebookEntryId + ', Quantity=' + finalItem.Quantity + ', UnitPrice=' + finalItem.UnitPrice);
                     finalOrderItems.add(finalItem);
@@ -410,19 +461,29 @@ public with sharing class AccountCreationController {
             
             // Validate input parameters
             if(String.isBlank(selectedProductTerm) || orderItems == null || orderItems.isEmpty()) {
-                System.debug('Invalid parameters for invoice creation');
-                return 'No invoices created - missing product term or order items';
+                System.debug('Invalid parameters for invoice creation - selectedProductTerm: "' + selectedProductTerm + '", orderItems: ' + (orderItems != null ? String.valueOf(orderItems.size()) : 'null'));
+                // If product term is blank but we have order items, try to use a default
+                if(String.isBlank(selectedProductTerm) && orderItems != null && !orderItems.isEmpty()) {
+                    System.debug('WARNING: No product term provided, defaulting to "Upfront" for invoice creation');
+                    selectedProductTerm = 'Upfront';
+                } else {
+                    return 'No invoices created - missing product term or order items';
+                }
             }
             
             // Parse product term to get number of invoices to create
             Integer numberOfInvoices;
             try {
                 // Handle "upfront" as a single payment (1 invoice)
-                if(selectedProductTerm.equalsIgnoreCase('upfront')) {
+                if(selectedProductTerm != null && selectedProductTerm.equalsIgnoreCase('upfront')) {
                     numberOfInvoices = 1;
                     System.debug('Upfront payment detected - creating 1 invoice');
-                } else {
+                } else if(selectedProductTerm != null) {
                     numberOfInvoices = Integer.valueOf(selectedProductTerm);
+                } else {
+                    // Default to 1 invoice if selectedProductTerm is null
+                    numberOfInvoices = 1;
+                    System.debug('selectedProductTerm is null, defaulting to 1 invoice (upfront)');
                 }
             } catch(Exception e) {
                 System.debug('Error parsing product term: ' + selectedProductTerm);
@@ -435,129 +496,231 @@ public with sharing class AccountCreationController {
             }
             
             System.debug('Creating ' + numberOfInvoices + ' invoices');
+
             
-            // Get account billing information
-            Account myAccount = [SELECT Id, Name, BillingStreet, BillingCity, BillingState, 
-                                BillingPostalCode, BillingCountry 
-                                FROM Account WHERE Id = :accountId LIMIT 1];
-            
-            // Calculate amount per invoice (divide total order amount by number of invoices)
-            Decimal totalOrderAmount = 0;
-            for(OrderItem item : orderItems) {
-                totalOrderAmount += (item.UnitPrice * item.Quantity);
+
+            // ====================================================================
+        // STEP 1: BULK SOQL - Get all data needed before the loop
+        // ====================================================================
+
+        // Get all PricebookEntry IDs from the order items
+        Set<Id> pbeIds = new Set<Id>();
+        for (OrderItem oi : orderItems) {
+            pbeIds.add(oi.PricebookEntryId);
+        }
+
+        // Query all PricebookEntries at once and create a Map for easy lookup
+        Map<Id, PricebookEntry> pbeMap = new Map<Id, PricebookEntry>([
+            SELECT Id, Product2Id FROM PricebookEntry WHERE Id IN :pbeIds
+        ]);
+
+        // ====================================================================
+        // STEP 2: PREPARE DML - Create lists to hold records for insertion
+        // ====================================================================
+        List<Invoice__c> invoicesToInsert = new List<Invoice__c>();
+        List<InvoiceLine__c> allInvoiceLinesToInsert = new List<InvoiceLine__c>();
+        Date baseInvoiceDate = Date.today();
+
+        // Loop to prepare records, but DO NOT perform DML here
+        for (Integer i = 0; i < numberOfInvoices; i++) {
+            Invoice__c newInvoice = new Invoice__c(
+                BillingAccountId__c = accountId,
+                InvoiceDate__c = baseInvoiceDate.addMonths(i),
+                DueDate__c = baseInvoiceDate.addMonths(i),
+                ReferenceEntityId__c = orderId,
+                Status__c = 'Draft'
+            );
+            invoicesToInsert.add(newInvoice);
+        }
+
+        // Insert all invoices at once
+        insert invoicesToInsert;
+
+        // Now that invoices have IDs, prepare their line items
+        List<Invoice__c> invoicesToUpdate = new List<Invoice__c>();
+        for (Invoice__c inv : invoicesToInsert) {
+            Decimal invoiceChargeAmountWithTax = 0;
+            Decimal invoiceChargeTax = 0;
+
+            for (OrderItem orderItem : orderItems) {
+                PricebookEntry pbe = pbeMap.get(orderItem.PricebookEntryId);
+                if (pbe == null) continue; // Skip if no matching PBE found
+
+                Decimal baseUnitPrice = orderItem.UnitPrice / 1.10; // Remove tax
+                Decimal finalUnitPrice = (numberOfInvoices == 1) ? baseUnitPrice * orderItem.Quantity : (baseUnitPrice / numberOfInvoices) * orderItem.Quantity;
+                Decimal taxPrice = finalUnitPrice * 0.10;
+
+                InvoiceLine__c line = new InvoiceLine__c();
+                line.InvoiceId__c = inv.Id; // Assign parent invoice ID
+                line.TaxRate__c = 10;
+                line.ReferenceEntityItemId__c = orderItem.Id;
+                line.Type__c = 'Product';
+                line.Quantity__c = orderItem.Quantity;
+                line.Product2Id__c = pbe.Product2Id; // *** Use the Map, NOT a new SOQL query ***
+                line.UnitPrice__c = finalUnitPrice;
+                line.TaxAmount__c = taxPrice;
+                line.ChargeAmount__c = finalUnitPrice;
+                line.Charge_Amount_with_Tax__c = finalUnitPrice + taxPrice;
+                line.ChargeTaxAmount__c = taxPrice;
+                line.InvoiceLineStartDate__c = inv.InvoiceDate__c;
+                line.InvoiceLineEndDate__c = inv.InvoiceDate__c.addMonths(1).addDays(-1);
+
+                allInvoiceLinesToInsert.add(line);
+
+                // Add to this invoice's totals
+                invoiceChargeAmountWithTax += line.Charge_Amount_with_Tax__c;
+                invoiceChargeTax += line.ChargeTaxAmount__c;
             }
-            
-            System.debug('Total order amount: ' + totalOrderAmount);
-            
-            Date baseInvoiceDate = Date.today();
-            Integer totalInvoicesCreated = 0;
-            Integer totalInvoiceLinesCreated = 0;
-            
-            // Id contractId = [SELECT Id FROM Contract WHERE AccountId =: accountId].Id;
-            // Create invoices one by one following the provided pattern
-            for(Integer i = 1; i <= numberOfInvoices; i++) {
-                try {
-                    // Initialize totals for THIS specific invoice
-                    Decimal invoiceChargeAmountWithTax = 0.0;
-                    Decimal invoiceChargeTax = 0.0;
-                    
-                    // 1. Create the Invoice record
-                    Invoice__c newInvoice = new Invoice__c();
-                    newInvoice.BillingAccountId__c = accountId;
-                    newInvoice.InvoiceDate__c = baseInvoiceDate.addMonths(i - 1);
-                    newInvoice.DueDate__c = baseInvoiceDate.addMonths(i - 1);
-                    newInvoice.ReferenceEntityId__c = orderId;
-                    newInvoice.Status__c = 'Draft';
-                    // newInvoice.BillToContactId__c = contractId;
 
-                    // Note: Using available standard fields only
-                    
-                    // 4. Insert the invoice
-                    insert newInvoice;
-                    totalInvoicesCreated++;
-                    System.debug('Successfully created Invoice ' + i + ' with ID: ' + newInvoice.Id);
-                    
-                    // Create invoice line items for this invoice
-                    List<InvoiceLine__c> invoiceLineItems = new List<InvoiceLine__c>();
-                    
-                    for(OrderItem orderItem : orderItems) {
-                        // 2. Create the Invoice Line Item
-                        InvoiceLine__c invoiceLineItem = new InvoiceLine__c();
-                        invoiceLineItem.InvoiceId__c = newInvoice.Id;
-                        invoiceLineItem.TaxRate__c = 10;
-                        invoiceLineItem.ReferenceEntityItemId__c = orderItem.Id;
-                        invoiceLineItem.Type__c = 'Product';
-                        invoiceLineItem.Quantity__c = orderItem.Quantity;
-                        invoiceLineItem.Product2Id__c = getProduct2IdFromOrderItem(orderItem);
-                        
-                        // Calculate unit price based on payment term
-                        Decimal baseUnitPrice = orderItem.UnitPrice / 1.10; // Remove tax first
-                        Decimal finalUnitPrice;
-                        
-                        if(selectedProductTerm.equalsIgnoreCase('upfront')) {
-                            // For upfront payment, use full amount (don't divide)
-                            finalUnitPrice = baseUnitPrice * orderItem.Quantity;
-                        } else {
-                            // For installment payments, divide by number of terms
-                            finalUnitPrice = (baseUnitPrice / numberOfInvoices) * orderItem.Quantity;
-                        }
-                        
-                        Decimal taxPrice = finalUnitPrice * 0.10;
-                        
-                        invoiceLineItem.UnitPrice__c = finalUnitPrice;
-                        invoiceLineItem.TaxAmount__c = taxPrice;
+            // Update the parent invoice totals
+            inv.TotalChargeAmountWithTax__c = invoiceChargeAmountWithTax;
+            inv.TotalChargeTaxAmount__c = invoiceChargeTax;
+            inv.Balance__c = invoiceChargeAmountWithTax;
+            inv.Payment_Link__c = StripeIntentController.getVFPageURL(inv.Id); // This might have its own query, be careful
+            invoicesToUpdate.add(inv);
+        }
 
-                        invoiceLineItem.ChargeAmount__c = finalUnitPrice;
-                        invoiceLineItem.Charge_Amount_with_Tax__c = finalUnitPrice + taxPrice;
-                        invoiceLineItem.ChargeTaxAmount__c = taxPrice;
+        // ====================================================================
+        // STEP 3: PERFORM BULK DML - One insert and one update for all records
+        // ====================================================================
+        if (!allInvoiceLinesToInsert.isEmpty()) {
+            insert allInvoiceLinesToInsert;
+        }
+        if (!invoicesToUpdate.isEmpty()) {
+            update invoicesToUpdate;
+        }
 
-                        // Add to THIS invoice's totals only
-                        invoiceChargeAmountWithTax += invoiceLineItem.Charge_Amount_with_Tax__c;
-                        invoiceChargeTax += invoiceLineItem.ChargeTaxAmount__c;
-                        
-                        // Set invoice line dates
-                        invoiceLineItem.InvoiceLineStartDate__c = newInvoice.InvoiceDate__c;
-                        invoiceLineItem.InvoiceLineEndDate__c = newInvoice.InvoiceDate__c.addMonths(1).addDays(-1);
-                        
-                        invoiceLineItems.add(invoiceLineItem);
-                        
-                        System.debug('Prepared InvoiceLine for Invoice ' + i + 
-                                   ': Quantity=' + invoiceLineItem.Quantity__c + 
-                                   ', UnitPrice=' + invoiceLineItem.UnitPrice__c + 
-                                   ', ChargeAmountWithTax=' + invoiceLineItem.Charge_Amount_with_Tax__c);
-                    }
+        return invoicesToUpdate.size() + ' invoices created successfully with ' + allInvoiceLinesToInsert.size() + ' invoice line items';
+		
+
+
+            
+            
+            // // Get account billing information
+            // Account myAccount = [SELECT Id, Name, BillingStreet, BillingCity, BillingState, 
+            //                     BillingPostalCode, BillingCountry 
+            //                     FROM Account WHERE Id = :accountId LIMIT 1];
+            
+            // // Calculate amount per invoice (divide total order amount by number of invoices)
+            // Decimal totalOrderAmount = 0;
+            // for(OrderItem item : orderItems) {
+            //     totalOrderAmount += (item.UnitPrice * item.Quantity);
+            // }
+            
+            // System.debug('Total order amount: ' + totalOrderAmount);
+            
+            // Date baseInvoiceDate = Date.today();
+            // Integer totalInvoicesCreated = 0;
+            // Integer totalInvoiceLinesCreated = 0;
+            
+            // // Id contractId = [SELECT Id FROM Contract WHERE AccountId =: accountId].Id;
+            // // Create invoices one by one following the provided pattern
+            // for(Integer i = 1; i <= numberOfInvoices; i++) {
+            //     try {
+            //         // Initialize totals for THIS specific invoice
+            //         Decimal invoiceChargeAmountWithTax = 0.0;
+            //         Decimal invoiceChargeTax = 0.0;
                     
-                    // Insert invoice line items
-                    if(!invoiceLineItems.isEmpty()) {
-                        try {
-                            // Update invoice totals with THIS invoice's calculated amounts
-                            newInvoice.TotalChargeAmountWithTax__c = invoiceChargeAmountWithTax;
-                            newInvoice.TotalChargeTaxAmount__c = invoiceChargeTax;
-                            newInvoice.Balance__c = invoiceChargeAmountWithTax;
-                            // newInvoice.BillToContactId__c = getContractIdFromAccount(accountId);
-                            update newInvoice;
+            //         // 1. Create the Invoice record
+            //         Invoice__c newInvoice = new Invoice__c();
+            //         newInvoice.BillingAccountId__c = accountId;
+            //         newInvoice.InvoiceDate__c = baseInvoiceDate.addMonths(i - 1);
+            //         newInvoice.DueDate__c = baseInvoiceDate.addMonths(i - 1);
+            //         newInvoice.ReferenceEntityId__c = orderId;
+            //         newInvoice.Status__c = 'Draft';
+                    
+
+            //         // newInvoice.BillToContactId__c = contractId;
+
+            //         // Note: Using available standard fields only
+                    
+            //         // 4. Insert the invoice
+            //         insert newInvoice;
+            //         totalInvoicesCreated++;
+            //         System.debug('Successfully created Invoice ' + i + ' with ID: ' + newInvoice.Id);
+                    
+            //         // Create invoice line items for this invoice
+            //         List<InvoiceLine__c> invoiceLineItems = new List<InvoiceLine__c>();
+                    
+            //         for(OrderItem orderItem : orderItems) {
+            //             // 2. Create the Invoice Line Item
+            //             InvoiceLine__c invoiceLineItem = new InvoiceLine__c();
+            //             invoiceLineItem.InvoiceId__c = newInvoice.Id;
+            //             invoiceLineItem.TaxRate__c = 10;
+            //             invoiceLineItem.ReferenceEntityItemId__c = orderItem.Id;
+            //             invoiceLineItem.Type__c = 'Product';
+            //             invoiceLineItem.Quantity__c = orderItem.Quantity;
+            //             invoiceLineItem.Product2Id__c = getProduct2IdFromOrderItem(orderItem);
+                        
+            //             // Calculate unit price based on payment term
+            //             Decimal baseUnitPrice = orderItem.UnitPrice / 1.10; // Remove tax first
+            //             Decimal finalUnitPrice;
+                        
+            //             if(selectedProductTerm != null && selectedProductTerm.equalsIgnoreCase('upfront')) {
+            //                 // For upfront payment, use full amount (don't divide)
+            //                 finalUnitPrice = baseUnitPrice * orderItem.Quantity;
+            //             } else {
+            //                 // For installment payments, divide by number of terms
+            //                 finalUnitPrice = (baseUnitPrice / numberOfInvoices) * orderItem.Quantity;
+            //             }
+                        
+            //             Decimal taxPrice = finalUnitPrice * 0.10;
+                        
+            //             invoiceLineItem.UnitPrice__c = finalUnitPrice;
+            //             invoiceLineItem.TaxAmount__c = taxPrice;
+
+            //             invoiceLineItem.ChargeAmount__c = finalUnitPrice;
+            //             invoiceLineItem.Charge_Amount_with_Tax__c = finalUnitPrice + taxPrice;
+            //             invoiceLineItem.ChargeTaxAmount__c = taxPrice;
+
+            //             // Add to THIS invoice's totals only
+            //             invoiceChargeAmountWithTax += invoiceLineItem.Charge_Amount_with_Tax__c;
+            //             invoiceChargeTax += invoiceLineItem.ChargeTaxAmount__c;
+                        
+            //             // Set invoice line dates
+            //             invoiceLineItem.InvoiceLineStartDate__c = newInvoice.InvoiceDate__c;
+            //             invoiceLineItem.InvoiceLineEndDate__c = newInvoice.InvoiceDate__c.addMonths(1).addDays(-1);
+                        
+            //             invoiceLineItems.add(invoiceLineItem);
+                        
+            //             System.debug('Prepared InvoiceLine for Invoice ' + i + 
+            //                        ': Quantity=' + invoiceLineItem.Quantity__c + 
+            //                        ', UnitPrice=' + invoiceLineItem.UnitPrice__c + 
+            //                        ', ChargeAmountWithTax=' + invoiceLineItem.Charge_Amount_with_Tax__c);
+            //         }
+                    
+            //         // Insert invoice line items
+            //         if(!invoiceLineItems.isEmpty()) {
+            //             try {
+            //                 // Update invoice totals with THIS invoice's calculated amounts
+            //                 newInvoice.TotalChargeAmountWithTax__c = invoiceChargeAmountWithTax;
+            //                 newInvoice.TotalChargeTaxAmount__c = invoiceChargeTax;
+            //                 newInvoice.Balance__c = invoiceChargeAmountWithTax;
+            //                 newInvoice.Payment_Link__c = StripeIntentController.getVFPageURL(newInvoice.Id);
+            //                 // newInvoice.BillToContactId__c = getContractIdFromAccount(accountId);
+            //                 update newInvoice;
                             
-                            System.debug('Updated Invoice ' + i + ' totals: ChargeAmountWithTax=' + invoiceChargeAmountWithTax + 
-                                       ', ChargeTax=' + invoiceChargeTax + ', Balance=' + invoiceChargeAmountWithTax);
+            //                 System.debug('Updated Invoice ' + i + ' totals: ChargeAmountWithTax=' + invoiceChargeAmountWithTax + 
+            //                            ', ChargeTax=' + invoiceChargeTax + ', Balance=' + invoiceChargeAmountWithTax);
                             
-                            insert invoiceLineItems;
-                            totalInvoiceLinesCreated += invoiceLineItems.size();
-                            System.debug('Successfully inserted ' + invoiceLineItems.size() + ' invoice line items for Invoice ' + i);
-                        } catch(DmlException lineItemEx) {
-                            System.debug('Error creating invoice line items for Invoice ' + i + ': ' + lineItemEx.getMessage());
-                        }
-                    }
+            //                 insert invoiceLineItems;
+            //                 totalInvoiceLinesCreated += invoiceLineItems.size();
+            //                 System.debug('Successfully inserted ' + invoiceLineItems.size() + ' invoice line items for Invoice ' + i);
+            //             } catch(DmlException lineItemEx) {
+            //                 System.debug('Error creating invoice line items for Invoice ' + i + ': ' + lineItemEx.getMessage());
+            //             }
+            //         }
                     
-                } catch(DmlException invoiceEx) {
-                    System.debug('Error creating Invoice ' + i + ': ' + invoiceEx.getMessage());
-                    if(i == 1) {
-                        // If first invoice fails, return error message
-                        return 'Note: Invoices could not be created due to org restrictions. Order created successfully.';
-                    }
-                }
-            }
+            //     } catch(DmlException invoiceEx) {
+            //         System.debug('Error creating Invoice ' + i + ': ' + invoiceEx.getMessage());
+            //         if(i == 1) {
+            //             // If first invoice fails, return error message
+            //             return 'Note: Invoices could not be created due to org restrictions. Order created successfully.';
+            //         }
+            //     }
+            // }
             
-            return totalInvoicesCreated + ' invoices created successfully with ' + totalInvoiceLinesCreated + ' invoice line items';
+            // return totalInvoicesCreated + ' invoices created successfully with ' + totalInvoiceLinesCreated + ' invoice line items';
             
         } catch(Exception e) {
             System.debug('Error in createInvoicesBasedOnTerms: ' + e.getMessage());

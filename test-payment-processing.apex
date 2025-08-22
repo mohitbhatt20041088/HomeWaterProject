@@ -20,7 +20,7 @@ if (!orders.isEmpty()) {
     
     // Now test the fulfillment creation
     try {
-        String result = PostPaymentOrderProcessingController.processPaymentCompletedOrder(orderId, 'pi_test_payment_intent_123');
+        String result = PostPaymentOrderProcessingHelper.processOrderByIdAfterPayment(orderId, 'pi_test_payment_intent_123');
         System.debug('✅ Processing result: ' + result);
         
         // Check if fulfillment records were created

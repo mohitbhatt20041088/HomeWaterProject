@@ -174,7 +174,9 @@ public with sharing class PostPaymentOrderProcessingController {
                 Status__c = 'Draft',  // Using valid picklist value
                 Created_Date__c = Date.today(),
                 Type__c = 'Warehouse',  // Using valid picklist value
-                Is_Suspended__c = false
+                Is_Suspended__c = false,
+                Activated_Date__c = Date.today(),
+                Installation_To_Email_Address__c = order.Account.PersonEmail
             );
             
             insert installationOrder;

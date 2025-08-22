@@ -54,12 +54,43 @@ export default class FilterProductTableComponent extends NavigationMixin (Lightn
     // Process filtered products from parent component
     processFilteredProducts() {
         if (this.filteredProducts && Array.isArray(this.filteredProducts)) {
-            this.allRows = this.filteredProducts.map(p => ({
-                ...p,
-                id       : p.Id,
-                name     : p.Name,
-                imageUrl : this.getImageUrl(p.Product_Image__c)
-            }));
+            console.log('Processing filtered products:', this.filteredProducts.length);
+            
+            this.allRows = this.filteredProducts.map(p => {
+                console.log('Product:', p.Name, 'PricebookEntries:', p.PricebookEntries);
+                
+                let price = 0;
+                
+                // Try to get price from PricebookEntries
+                if (p.PricebookEntries && p.PricebookEntries.length > 0) {
+                    price = p.PricebookEntries[0].UnitPrice;
+                    console.log('Price from PricebookEntries:', price);
+                } 
+                // Try to get price from direct price fields
+                else if (p.Price__c) {
+                    price = p.Price__c;
+                    console.log('Price from Price__c:', price);
+                } 
+                else if (p.List_Price__c) {
+                    price = p.List_Price__c;
+                    console.log('Price from List_Price__c:', price);
+                }
+                else if (p.Unit_Price__c) {
+                    price = p.Unit_Price__c;
+                    console.log('Price from Unit_Price__c:', price);
+                }
+                else {
+                    console.log('No price found for product:', p.Name);
+                }
+                
+                return {
+                    ...p,
+                    id       : p.Id,
+                    name     : p.Name,
+                    imageUrl : this.getImageUrl(p.Product_Image__c),
+                    Price    : price
+                };
+            });
             this.currentPage = 1; // reset to first page on new filter
             
             // Always clear selections when new filtered data arrives for better UX
@@ -127,7 +158,25 @@ export default class FilterProductTableComponent extends NavigationMixin (Lightn
     
     saveFilteredProducts() {
         try {
-            localStorage.setItem('filteredProductsData', JSON.stringify(this.allRows));
+            // Use setTimeout to make localStorage operations non-blocking
+            setTimeout(() => {
+                // Only save essential data to reduce payload size
+                const essentialData = this.allRows.map(product => ({
+                    id: product.id,
+                    Id: product.Id,
+                    name: product.name,
+                    Name: product.Name,
+                    Price: product.Price,
+                    imageUrl: product.imageUrl,
+                    // Only include essential fields
+                    Billing_Type__c: product.Billing_Type__c,
+                    Family: product.Family,
+                    Stage__c: product.Stage__c,
+                    Preferred_Block__c: product.Preferred_Block__c
+                }));
+                
+                localStorage.setItem('filteredProductsData', JSON.stringify(essentialData));
+            }, 0);
         } catch (error) {
             console.error('Error saving filtered products:', error);
         }
@@ -205,29 +254,73 @@ export default class FilterProductTableComponent extends NavigationMixin (Lightn
         this.dispatchEvent(navigationEvent);
     }
     handleNext() { 
-        // Get selected products
-        const selectedProducts = this.allRows.filter(product => this.selectedIds.has(product.id));
+        console.log('handleNext clicked - starting processing');
         
-        // Add validation: ensure at least one product is selected
-        if (selectedProducts.length === 0) {
-            this.dispatchEvent(
-                new ShowToastEvent({
-                    title: 'No Product Selected',
-                    message: 'Please select at least one product to proceed.',
-                    variant: 'warning',
-                })
-            );
-            return; // Stop execution
-        }
+        // Use setTimeout to prevent UI freezing during heavy processing
+        setTimeout(() => {
+            try {
+                // Get selected products
+                console.log('Filtering selected products from', this.allRows.length, 'total products');
+                const selectedProducts = this.allRows.filter(product => this.selectedIds.has(product.id));
+                console.log('Found', selectedProducts.length, 'selected products');
+                
+                // Add validation: ensure at least one product is selected
+                if (selectedProducts.length === 0) {
+                    this.dispatchEvent(
+                        new ShowToastEvent({
+                            title: 'No Product Selected',
+                            message: 'Please select at least one product to proceed.',
+                            variant: 'warning',
+                        })
+                    );
+                    return; // Stop execution
+                }
 
-        // Navigate to detail screen with selected products
-        const navigationEvent = new CustomEvent('navigate', {
-            detail: { 
-                view: 'detail', 
-                data: selectedProducts
+                // Optimize selected products data - remove unnecessary fields to reduce payload
+                const optimizedSelectedProducts = selectedProducts.map(product => {
+                    return {
+                        id: product.id,
+                        name: product.name,
+                        Name: product.Name,
+                        Id: product.Id,
+                        Price: product.Price,
+                        // Include only essential fields to reduce memory usage
+                        Billing_Type__c: product.Billing_Type__c,
+                        Family: product.Family,
+                        Stage__c: product.Stage__c,
+                        Preferred_Block__c: product.Preferred_Block__c,
+                        Product_Image__c: product.Product_Image__c,
+                        imageUrl: product.imageUrl,
+                        // Include price-related fields for calculation
+                        PricebookEntries: product.PricebookEntries,
+                        Price__c: product.Price__c,
+                        List_Price__c: product.List_Price__c,
+                        Unit_Price__c: product.Unit_Price__c
+                    };
+                });
+
+                console.log('Dispatching navigation event to parent');
+                // Navigate to terms screen with selected products
+                const navigationEvent = new CustomEvent('navigate', {
+                    detail: { 
+                        view: 'terms', 
+                        data: optimizedSelectedProducts
+                    }
+                });
+                this.dispatchEvent(navigationEvent);
+                console.log('Navigation event dispatched successfully');
+                
+            } catch (error) {
+                console.error('Error in handleNext:', error);
+                this.dispatchEvent(
+                    new ShowToastEvent({
+                        title: 'Processing Error',
+                        message: 'An error occurred while processing your selection. Please try again.',
+                        variant: 'error',
+                    })
+                );
             }
-        });
-        this.dispatchEvent(navigationEvent);
+        }, 10); // Small delay to prevent UI blocking
     }
 
     /* ── selection handlers ── */

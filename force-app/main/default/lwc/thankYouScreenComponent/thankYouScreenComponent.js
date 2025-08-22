@@ -2,11 +2,9 @@ import { LightningElement, track, api } from 'lwc';
 import getTodaysFirstInvoice from '@salesforce/apex/StripeIntentController.getTodaysFirstInvoice';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import { NavigationMixin } from 'lightning/navigation';
-import { CurrentPageReference } from 'lightning/navigation';
 import USER_ID from '@salesforce/user/Id';
 import getAccountByUserId from '@salesforce/apex/StripeIntentController.getAccountByUserId';
 import getLatestInvoiceForAccount from '@salesforce/apex/StripeIntentController.getLatestInvoiceForAccount';
-import getLatestInvoiceForAccountByName from '@salesforce/apex/StripeIntentController.getLatestInvoiceForAccountByName';
 import getLatestInvoiceFromRecentAccount from '@salesforce/apex/StripeIntentController.getLatestInvoiceFromRecentAccount';
 
 export default class ThankYouScreenComponent extends NavigationMixin(LightningElement) {
@@ -18,8 +16,7 @@ export default class ThankYouScreenComponent extends NavigationMixin(LightningEl
     @api invoiceId; // Direct invoice ID passed from parent
     @api accountId; // Direct account ID passed from parent
     
-    // Current page reference to get URL parameters
-    @track currentPageReference;
+
     
     // User ID
     userId = USER_ID;
@@ -245,6 +242,8 @@ export default class ThankYouScreenComponent extends NavigationMixin(LightningEl
     }
     
     // Fallback navigation method using URL
+    
+    
     navigateToPaymentPortalByUrl(invoiceId, accountId) {
         // Get the current base URL
         const baseUrl = window.location.origin;
